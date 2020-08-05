@@ -1,0 +1,20 @@
+[package]
+name = "dare-rs"
+version = "0.1.0"
+authors = ["Grégoire Charvet 黑瓜 <greg@geekingfrog.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+build = "build.rs" # LALRPOP preprocessing
+
+# The generated code depends on lalrpop-util.
+[dependencies]
+lalrpop-util = { version = "0.19.0", features = ["lexer"] }
+regex = "1"
+
+# Add a build-time dependency on the lalrpop library:
+[build-dependencies]
+# lalrpop = "0.19.0"
+# If you do not supply your own, external lexer you also need the `lexer` feature
+lalrpop = { version = "0.19.0", features = ["lexer"] }

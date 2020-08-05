@@ -1,0 +1,230 @@
+use crate::ast::{
+  Struct,
+  Enum,
+  Type,
+  AtomicType,
+  RefType,
+  Field,
+  EnumVariant,
+  VariantValue,
+  TopDeclaration,
+  Alias,
+};
+
+grammar;
+
+pub TopDeclaration: TopDeclaration = {
+  Struct => TopDeclaration::Struct(<>),
+  Enum => TopDeclaration::Enum(<>),
+}
+
+pub Struct: Struct = {
+  "struct" <name:Word> <params: TopLevelParams> "{" <fields:Comma<Field>> "}" => Struct {
+    name: name.to_string(),
+    type_parameters: params,
+    fields,
+  }
+}
+
+pub Enum: Enum = {
+  "enum" <name:Word> <params: TopLevelParams> "{" <variants:Comma<EnumVariant>> "}" => Enum {
+    name: name.to_string(),
+    type_parameters: params,
+    variants,
+  }
+}
+
+pub Alias: Alias = {
+  "type" <name:Word> "=" <alias:RefType> => Alias {
+    name: name.to_string(),
+    alias,
+  }
+}
+
+pub AtomicType: AtomicType = {
+  "String" => AtomicType::Str,
+  "UInt" => AtomicType::UInt,
+  "Int" => AtomicType::Int,
+  "Int8" => AtomicType::Int8,
+  "Int16" => AtomicType::Int16,
+  "Int32" => AtomicType::Int32,
+  "Int64" => AtomicType::Int64,
+  "UInt8" => AtomicType::UInt8,
+  "UInt16" => AtomicType::UInt16,
+  "UInt32" => AtomicType::UInt32,
+  "UInt64" => AtomicType::UInt64,
+  "Float" => AtomicType::Float,
+  "Bool" => AtomicType::Bool,
+  "Bytes" => AtomicType::Bytes,
+}
+
+pub RefType: RefType = {
+  <Word> => RefType {
+    name: <>.to_string(),
+    type_parameters: vec![],
+  },
+
+  <n:Word> "<" <params:Comma<Type>> ">" => RefType {
+    name: n.to_string(),
+    type_parameters: params,
+  },
+}
+
+// comma separated vector of T, with optional trailing comma
+Comma<T>: Vec<T> = {
+    <v:(<T> ",")*> <e:T?> => match e {
+        None => v,
+        Some(e) => {
+            let mut v = v;
+            v.push(e);
+            v
+        }
+    }
+};
+
+Field: Field = {
+  <name:word> ":" <typ: Type> => Field {
+    name: name.to_string(),
+    typ,
+  },
+}
+
+Type: Type = {
+  <atom:AtomicType> => Type::Atomic(atom),
+  <Word> => Type::Generic(<>.to_string()),
+}
+
+
+TopLevelParams: Vec<String> = {
+  <x:("<" <Comma<Word>> ">")?> => match x {
+    None => vec![],
+    Some(params) => {
+      params.into_iter().map(|p| p.to_string()).collect()
+    }
+  }
+}
+
+EnumVariant: EnumVariant = {
+  <name:Word> <value:VariantValue> => EnumVariant {
+    name: name.to_string(),
+    value,
+  }
+}
+
+VariantValue: VariantValue = {
+  <x:("<" <Comma<Type>> ">")?> => match x {
+    None => VariantValue::Nothing,
+    Some(typs) => VariantValue::Type(typs),
+  }
+}
+
+
+match {
+  "struct",
+  "enum",
+  "type",
+  "String",
+  "UInt",
+  "Int",
+  "Int8",
+  "Int16",
+  "Int32",
+  "Int64",
+  "UInt8",
+  "UInt16",
+  "UInt32",
+  "UInt64",
+  "Float",
+  "Bool",
+  "Bytes",
+} else {
+  r"[A-Z]\w*" => Word,
+} else {
+  r"[a-z]\w*" => word,
+  _,
+}
+
+
+
+// pub Struct: Box<Decl> = {
+//   "struct" <name:Identifier> "{" <fields:Comma<Field>> "}"=> Box::new(
+//     Decl::Struct(Struct{
+//       name: name.to_string(),
+//       fields,
+//     })
+//   ),
+// }
+// 
+// // pub Enum: Box<Decl> =
+// 
+// Field: Field = {
+//   <name:FieldIdentifier> ":" <typ: Type> => Field{
+//     name: name.to_string(),
+//     typ,
+//   },
+// }
+// 
+// Type: Type = {
+//   "String" => Type::Str,
+//   "UInt" => Type::UInt,
+//   "Int" => Type::Int,
+//   "Int8" => Type::Int8,
+//   "Int16" => Type::Int16,
+//   "Int32" => Type::Int32,
+//   "Int64" => Type::Int64,
+//   "UInt8" => Type::UInt8,
+//   "UInt16" => Type::UInt16,
+//   "UInt32" => Type::UInt32,
+//   "UInt64" => Type::UInt64,
+//   "Float" => Type::Float,
+//   "Bool" => Type::Bool,
+//   "Bytes" => Type::Bytes,
+//   TypeCtor => <>,
+// }
+// 
+// match {
+//   "struct",
+//   "String",
+//   "UInt",
+//   "Int",
+//   "Int8",
+//   "Int16",
+//   "Int32",
+//   "Int64",
+//   "UInt8",
+//   "UInt16",
+//   "UInt32",
+//   "UInt64",
+//   "Float",
+//   "Bool",
+//   "Bytes",
+// } else {
+//   r"[A-Z]\w*" => Word,
+// } else {
+//   r"[a-z]\w*" => word,
+//   _,
+// }
+// 
+// TypeCtor: Type::TypeCtor = {
+//   <Word> "<>" => Type::TypeCtor(<>.to_string(), vec![])
+// }
+// 
+// Identifier: String = {
+//   Word => <>.to_string(),
+// }
+// 
+// FieldIdentifier: String = {
+//   word => <>.to_string(),
+// }
+// 
+// // comma separated vector of T, with optional trailing comma
+// Comma<T>: Vec<T> = {
+//     <v:(<T> ",")*> <e:T?> => match e {
+//         None => v,
+//         Some(e) => {
+//             let mut v = v;
+//             v.push(e);
+//             v
+//         }
+//     }
+// };
