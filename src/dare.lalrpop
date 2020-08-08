@@ -10,6 +10,7 @@ use crate::ast::{
   TopDeclaration,
   Alias,
   Builtin,
+  location,
 };
 
 grammar;
@@ -20,7 +21,8 @@ pub TopDeclaration: TopDeclaration = {
 }
 
 pub Struct: Struct = {
-  "struct" <name:Word> <params: TopLevelParams> "{" <fields:Comma<Field>> "}" => Struct {
+  <s:@L> "struct" <name:Word> <params: TopLevelParams> "{" <fields:Comma<Field>> "}" <e:@L> => Struct {
+    location: location(s, e),
     name: name.to_string(),
     type_parameters: params,
     fields,
@@ -28,7 +30,8 @@ pub Struct: Struct = {
 }
 
 pub Enum: Enum = {
-  "enum" <name:Word> <params: TopLevelParams> "{" <variants:Comma<EnumVariant>> "}" => Enum {
+  <s:@L> "enum" <name:Word> <params: TopLevelParams> "{" <variants:Comma<EnumVariant>> "}" <e:@L> => Enum {
+    location: location(s, e),
     name: name.to_string(),
     type_parameters: params,
     variants,
@@ -36,21 +39,24 @@ pub Enum: Enum = {
 }
 
 pub Alias: Alias = {
-  "type" <name:Word> "=" <alias:RefType> => Alias {
+  <s:@L> "type" <name:Word> "=" <alias:RefType> <e:@L> => Alias {
+    location: location(s, e),
     name: name.to_string(),
     alias,
   }
 }
 
 pub RefType: RefType = {
-  <n:Word> <params:("<" <Comma<Type>> ">")?> => RefType {
+  <s:@L> <n:Word> <params:("<" <Comma<Type>> ">")?> <e:@L> => RefType {
+    location: location(s, e),
     name: n.to_string(),
     type_parameters: params.unwrap_or(vec![]),
   },
 }
 
 pub Field: Field = {
-  <name:word> ":" <typ: Type> => Field {
+  <s:@L> <name:word> ":" <typ: Type> <e:@L> => Field {
+    location: location(s, e),
     name: name.to_string(),
     typ,
   },
@@ -58,7 +64,8 @@ pub Field: Field = {
 
 pub Type: Type = {
   <atom:AtomicType> => Type::Atomic(atom),
-  <n:Word> <types:("<" <Comma<Type>> ">")?> => Type::Reference(RefType {
+  <s:@L> <n:Word> <types:("<" <Comma<Type>> ">")?> <e:@L> => Type::Reference(RefType {
+    location: location(s, e),
     name: n.to_string(),
     type_parameters: types.unwrap_or(vec![]),
   }),
@@ -87,7 +94,8 @@ TopLevelParams: Vec<String> = {
 }
 
 EnumVariant: EnumVariant = {
-  <name:Word> <value:VariantValue> => EnumVariant {
+  <s:@L> <name:Word> <value:VariantValue> <e:@L> => EnumVariant {
+    location: location(s, e),
     name: name.to_string(),
     value,
   }
@@ -164,7 +172,7 @@ match {
 
 
 // pub Struct: Box<Decl> = {
-//   "struct" <name:Identifier> "{" <fields:Comma<Field>> "}"=> Box::new(
+//   "struct" <name:Identifier> "{" <fields:Comma<Field>> "}" => Box::new(
 //     Decl::Struct(Struct{
 //       name: name.to_string(),
 //       fields,

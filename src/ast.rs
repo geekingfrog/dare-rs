@@ -13,6 +13,7 @@ pub enum TopDeclaration {
 /// struct Bar<A, B> {…}
 #[derive(Debug, PartialEq, Eq)]
 pub struct Struct {
+    pub location: SrcSpan,
     pub name: String,
     // only generic types are allowed in definition
     pub type_parameters: Vec<String>,
@@ -26,6 +27,7 @@ pub struct Struct {
 /// field5: Bar<Map<String, V>>
 #[derive(Debug, PartialEq, Eq)]
 pub struct Field {
+    pub location: SrcSpan,
     pub name: String,
     pub typ: Type,
 }
@@ -39,6 +41,7 @@ pub struct Field {
 ///  or {"type": "Detailed", "value": ["val_A", "val_B"]}
 #[derive(Debug, PartialEq, Eq)]
 pub struct Enum {
+    pub location: SrcSpan,
     pub name: String,
     // only generic types are allowed in definition
     pub type_parameters: Vec<String>,
@@ -48,12 +51,14 @@ pub struct Enum {
 /// type MaybeInt = Maybe<Int>
 #[derive(Debug, PartialEq, Eq)]
 pub struct Alias {
+    pub location: SrcSpan,
     pub name: String,
     pub alias: RefType,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct EnumVariant {
+    pub location: SrcSpan,
     pub name: String,
     pub value: VariantValue,
 }
@@ -101,6 +106,7 @@ pub enum AtomicType {
 /// A reference to another type. Like Foo, or Bar<T>
 #[derive(Debug, PartialEq, Eq)]
 pub struct RefType {
+    pub location: SrcSpan,
     pub name: String,
     pub type_parameters: Vec<Type>,
 }
@@ -110,6 +116,16 @@ pub enum Builtin {
     List(Box<Type>),
     Optional(Box<Type>),
     Map(Box<Type>, Box<Type>),
+}
+
+pub fn location(start: usize, end: usize) -> SrcSpan {
+    SrcSpan { start, end }
+}
+
+#[derive(Debug, PartialEq, Eq, Default, Clone)]
+pub struct SrcSpan {
+    pub start: usize,
+    pub end: usize,
 }
 
 /*

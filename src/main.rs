@@ -12,7 +12,8 @@ fn main() {
 mod test {
     use super::*;
     use ast::{
-        Alias, AtomicType, Builtin, Enum, EnumVariant, Field, RefType, Struct, Type, VariantValue,
+        location, Alias, AtomicType, Builtin, Enum, EnumVariant, Field, RefType, SrcSpan, Struct,
+        Type, VariantValue,
     };
 
     #[test]
@@ -27,6 +28,7 @@ mod test {
         assert_eq!(
             expr,
             RefType {
+                location: location(0, 3),
                 name: "Foo".to_string(),
                 type_parameters: vec![]
             }
@@ -41,12 +43,14 @@ mod test {
         assert_eq!(
             expr,
             RefType {
+                location: location(0, 16),
                 name: "Foo".to_string(),
                 type_parameters: vec![
-                    make_generic("T1", vec![]),
+                    make_generic("T1", vec![], location(4, 6)),
                     Type::Reference(RefType {
+                        location: location(8, 15),
                         name: "Bar".to_string(),
-                        type_parameters: vec![make_generic("T1", vec![])],
+                        type_parameters: vec![make_generic("T1", vec![], location(12, 14))],
                     }),
                 ]
             }
@@ -59,6 +63,7 @@ mod test {
         assert_eq!(
             expr,
             RefType {
+                location: location(0, 8),
                 name: "Foo".to_string(),
                 type_parameters: vec![Type::Atomic(AtomicType::Int),]
             }
@@ -78,14 +83,17 @@ mod test {
         assert_eq!(
             expr,
             Struct {
+                location: location(0, 78),
                 name: "MyStruct".to_string(),
                 type_parameters: vec![],
                 fields: vec![
                     Field {
+                        location: location(30, 41),
                         name: "field1".to_string(),
                         typ: Type::Atomic(AtomicType::Int)
                     },
                     Field {
+                        location: location(55, 67),
                         name: "field2".to_string(),
                         typ: Type::Atomic(AtomicType::Bool)
                     }
@@ -103,11 +111,13 @@ mod test {
         assert_eq!(
             expr,
             Struct {
+                location: location(0, 39),
                 name: "MyStruct".to_string(),
                 type_parameters: vec!["Foo".to_string(), "Bar".to_string()],
                 fields: vec![Field {
+                    location: location(27, 38),
                     name: "field1".to_string(),
-                    typ: make_generic("Foo", vec![]),
+                    typ: make_generic("Foo", vec![], location(35, 38)),
                 },]
             }
         )
@@ -120,14 +130,17 @@ mod test {
         assert_eq!(
             expr,
             Enum {
+                location: location(0, 16),
                 name: "Base".to_string(),
                 type_parameters: vec![],
                 variants: vec![
                     EnumVariant {
+                        location: location(11, 12),
                         name: "A".to_string(),
                         value: VariantValue::Nothing,
                     },
                     EnumVariant {
+                        location: location(14, 15),
                         name: "G".to_string(),
                         value: VariantValue::Nothing,
                     }
@@ -145,14 +158,17 @@ mod test {
         assert_eq!(
             expr,
             Enum {
+                location: location(0, 34),
                 name: "MaybeInt".to_string(),
                 type_parameters: vec![],
                 variants: vec![
                     EnumVariant {
+                        location: location(15, 22),
                         name: "Nothing".to_string(),
                         value: VariantValue::Nothing,
                     },
                     EnumVariant {
+                        location: location(24, 33),
                         name: "Just".to_string(),
                         value: VariantValue::Type(vec![Type::Atomic(AtomicType::Int)]),
                     }
@@ -170,16 +186,23 @@ mod test {
         assert_eq!(
             expr,
             Enum {
+                location: location(0, 32),
                 name: "Maybe".to_string(),
                 type_parameters: vec!["T".to_string()],
                 variants: vec![
                     EnumVariant {
+                        location: location(15, 22),
                         name: "Nothing".to_string(),
                         value: VariantValue::Nothing,
                     },
                     EnumVariant {
+                        location: location(24, 31),
                         name: "Just".to_string(),
-                        value: VariantValue::Type(vec![make_generic("T", vec![])]),
+                        value: VariantValue::Type(vec![make_generic(
+                            "T",
+                            vec![],
+                            location(29, 30)
+                        )]),
                     }
                 ],
             }
@@ -194,8 +217,10 @@ mod test {
         assert_eq!(
             expr,
             Alias {
+                location: location(0, 35),
                 name: "MyResult".to_string(),
                 alias: RefType {
+                    location: location(16, 35),
                     name: "Result".to_string(),
                     type_parameters: vec![
                         Type::Atomic(AtomicType::Str),
@@ -220,7 +245,11 @@ mod test {
         let expr = dare::TypeParser::new().parse("List<Foo>").unwrap();
         assert_eq!(
             expr,
-            Type::Builtin(Builtin::List(Box::new(make_generic("Foo", vec![])))),
+            Type::Builtin(Builtin::List(Box::new(make_generic(
+                "Foo",
+                vec![],
+                location(5, 8)
+            )))),
         );
     }
 
@@ -230,6 +259,7 @@ mod test {
         assert_eq!(
             expr,
             Type::Builtin(Builtin::List(Box::new(Type::Reference(RefType {
+                location: location(5, 13),
                 name: "Foo".to_string(),
                 type_parameters: vec![Type::Atomic(AtomicType::Int)]
             })))),
@@ -256,6 +286,7 @@ mod test {
         let expected = Type::Builtin(Builtin::Optional(Box::new(make_generic(
             "Foo",
             vec![Type::Atomic(AtomicType::Int)],
+            location(0, 8),
         ))));
         assert_eq!(expr_short, expected);
     }
@@ -265,7 +296,7 @@ mod test {
         let expr = dare::TypeParser::new().parse("Map<String, Foo>").unwrap();
         let expected = Type::Builtin(Builtin::Map(
             Box::new(Type::Atomic(AtomicType::Str)),
-            Box::new(make_generic("Foo", vec![])),
+            Box::new(make_generic("Foo", vec![], location(12, 15))),
         ));
         assert_eq!(expr, expected)
     }
@@ -276,6 +307,7 @@ mod test {
             .parse("Optional<{foo: Int}>")
             .unwrap();
         let expected = Type::Builtin(Builtin::Optional(Box::new(Type::Anonymous(vec![Field {
+            location: location(10, 18),
             name: "foo".to_string(),
             typ: Type::Atomic(AtomicType::Int),
         }]))));
@@ -288,16 +320,20 @@ mod test {
             .parse("enum Foo {Stuff{f1: Int, f2: String}}")
             .unwrap();
         let expected = Enum {
+            location: location(0, 37),
             name: "Foo".to_string(),
             type_parameters: vec![],
             variants: vec![EnumVariant {
+                location: location(10, 36),
                 name: "Stuff".to_string(),
                 value: VariantValue::Type(vec![Type::Anonymous(vec![
                     Field {
+                        location: location(16, 23),
                         name: "f1".to_string(),
                         typ: Type::Atomic(AtomicType::Int),
                     },
                     Field {
+                        location: location(25, 35),
                         name: "f2".to_string(),
                         typ: Type::Atomic(AtomicType::Str),
                     },
@@ -313,11 +349,14 @@ mod test {
             .parse("struct Foo {base: {f1: Int}}")
             .unwrap();
         let expected = Struct {
+            location: location(0, 28),
             name: "Foo".to_string(),
             type_parameters: vec![],
             fields: vec![Field {
+                location: location(12, 27),
                 name: "base".to_string(),
                 typ: Type::Anonymous(vec![Field {
+                    location: location(19, 26),
                     name: "f1".to_string(),
                     typ: Type::Atomic(AtomicType::Int),
                 }]),
@@ -326,8 +365,9 @@ mod test {
         assert_eq!(expr, expected)
     }
 
-    fn make_generic(name: &str, params: Vec<Type>) -> Type {
+    fn make_generic(name: &str, params: Vec<Type>, loc: SrcSpan) -> Type {
         Type::Reference(RefType {
+            location: loc,
             name: name.to_string(),
             type_parameters: params,
         })
