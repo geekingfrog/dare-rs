@@ -69,8 +69,14 @@ pub enum VariantValue {
 /// (Foo, Bar<T>, Map<String, Int>), or a generic type like `T` or `errorType`.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Type {
+    /// One of the basic atomic type
     Atomic(AtomicType),
+    /// Generic type or reference to existing type
+    /// like List<Foo, T, Bar<Int>>
     Reference(RefType),
+    /// Anonymous structure like List<{foo: Int}>
+    Anonymous(Vec<Field>),
+    /// Builtin type like List, Map and Optional
     Builtin(Builtin),
 }
 
@@ -113,11 +119,13 @@ pub enum Builtin {
  * };
  *
  * struct Big<A,B,C,D> {
- *   big1: Int
+ *   big1: Int,
  *   big2: Option<A>,
  *   big3: Foo<B,C>,
- *   big4: Foo<String, D>
- *   big5: Foo<Foo<Bool, Int>, String>
+ *   big4: Foo<String, D>,
+ *   big5: Foo<Foo<Bool, Int>, String>,
+ *   big6: List<{nested1: Int, nested2: A}>
+ *
  * }
  *
  * type Test = Big<Bool, Int, Int, String>

@@ -63,9 +63,11 @@ pub Type: Type = {
     type_parameters: types.unwrap_or(vec![]),
   }),
 
+  "{" <fields:Comma<Field>> "}" => Type::Anonymous(fields),
+
   "List<" <typ:Type> ">" => Type::Builtin(Builtin::List(Box::new(typ))),
 
-  "Option<" <typ:Type> ">" => Type::Builtin(Builtin::Optional(Box::new(typ))),
+  "Optional<" <typ:Type> ">" => Type::Builtin(Builtin::Optional(Box::new(typ))),
   <typ:Type>"?" => Type::Builtin(Builtin::Optional(Box::new(typ))),
 
   "Map<" <key:Type> "," <val:Type> ">" => Type::Builtin(Builtin::Map(
@@ -92,6 +94,9 @@ EnumVariant: EnumVariant = {
 }
 
 VariantValue: VariantValue = {
+  "{" <fields:Comma<Field>> "}" => VariantValue::Type(
+    vec![Type::Anonymous(fields)]
+  ),
   <x:("<" <Comma<Type>> ">")?> => match x {
     None => VariantValue::Nothing,
     Some(typs) => VariantValue::Type(typs),

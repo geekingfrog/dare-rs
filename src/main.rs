@@ -238,7 +238,7 @@ mod test {
 
     #[test]
     fn optional_full() {
-        let expr_full = dare::TypeParser::new().parse("Option<String>").unwrap();
+        let expr_full = dare::TypeParser::new().parse("Optional<String>").unwrap();
         let expected = Type::Builtin(Builtin::Optional(Box::new(Type::Atomic(AtomicType::Str))));
         assert_eq!(expr_full, expected);
     }
@@ -267,6 +267,62 @@ mod test {
             Box::new(Type::Atomic(AtomicType::Str)),
             Box::new(make_generic("Foo", vec![])),
         ));
+        assert_eq!(expr, expected)
+    }
+
+    #[test]
+    fn anon_struct() {
+        let expr = dare::TypeParser::new()
+            .parse("Optional<{foo: Int}>")
+            .unwrap();
+        let expected = Type::Builtin(Builtin::Optional(Box::new(Type::Anonymous(vec![Field {
+            name: "foo".to_string(),
+            typ: Type::Atomic(AtomicType::Int),
+        }]))));
+        assert_eq!(expr, expected)
+    }
+
+    #[test]
+    fn anon_struct_in_enum() {
+        let expr = dare::EnumParser::new()
+            .parse("enum Foo {Stuff{f1: Int, f2: String}}")
+            .unwrap();
+        let expected = Enum {
+            name: "Foo".to_string(),
+            type_parameters: vec![],
+            variants: vec![EnumVariant {
+                name: "Stuff".to_string(),
+                value: VariantValue::Type(vec![Type::Anonymous(vec![
+                    Field {
+                        name: "f1".to_string(),
+                        typ: Type::Atomic(AtomicType::Int),
+                    },
+                    Field {
+                        name: "f2".to_string(),
+                        typ: Type::Atomic(AtomicType::Str),
+                    },
+                ])]),
+            }],
+        };
+        assert_eq!(expr, expected)
+    }
+
+    #[test]
+    fn anon_struct_in_struct() {
+        let expr = dare::StructParser::new()
+            .parse("struct Foo {base: {f1: Int}}")
+            .unwrap();
+        let expected = Struct {
+            name: "Foo".to_string(),
+            type_parameters: vec![],
+            fields: vec![Field {
+                name: "base".to_string(),
+                typ: Type::Anonymous(vec![Field {
+                    name: "f1".to_string(),
+                    typ: Type::Atomic(AtomicType::Int),
+                }]),
+            }],
+        };
         assert_eq!(expr, expected)
     }
 
