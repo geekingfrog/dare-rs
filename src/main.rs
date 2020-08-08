@@ -11,7 +11,9 @@ fn main() {
 #[cfg(test)]
 mod test {
     use super::*;
-    use ast::{Alias, AtomicType, Enum, EnumVariant, Field, RefType, Struct, Type, VariantValue};
+    use ast::{
+        Alias, AtomicType, Builtin, Enum, EnumVariant, Field, RefType, Struct, Type, VariantValue,
+    };
 
     #[test]
     fn atomic_type() {
@@ -33,14 +35,19 @@ mod test {
 
     #[test]
     fn parametrised_ref_type() {
-        let expr = dare::RefTypeParser::new().parse("Foo<T1, T2>").unwrap();
+        let expr = dare::RefTypeParser::new()
+            .parse("Foo<T1, Bar<T1>>")
+            .unwrap();
         assert_eq!(
             expr,
             RefType {
                 name: "Foo".to_string(),
                 type_parameters: vec![
-                    Type::Generic("T1".to_string()),
-                    Type::Generic("T2".to_string())
+                    make_generic("T1", vec![]),
+                    Type::Reference(RefType {
+                        name: "Bar".to_string(),
+                        type_parameters: vec![make_generic("T1", vec![])],
+                    }),
                 ]
             }
         );
@@ -100,7 +107,7 @@ mod test {
                 type_parameters: vec!["Foo".to_string(), "Bar".to_string()],
                 fields: vec![Field {
                     name: "field1".to_string(),
-                    typ: Type::Generic("Foo".to_string()),
+                    typ: make_generic("Foo", vec![]),
                 },]
             }
         )
@@ -172,7 +179,7 @@ mod test {
                     },
                     EnumVariant {
                         name: "Just".to_string(),
-                        value: VariantValue::Type(vec![Type::Generic("T".to_string())]),
+                        value: VariantValue::Type(vec![make_generic("T", vec![])]),
                     }
                 ],
             }
@@ -197,5 +204,76 @@ mod test {
                 }
             }
         );
+    }
+
+    #[test]
+    fn list_with_atomic() {
+        let expr = dare::TypeParser::new().parse("List<Int>").unwrap();
+        assert_eq!(
+            expr,
+            Type::Builtin(Builtin::List(Box::new(Type::Atomic(AtomicType::Int)))),
+        );
+    }
+
+    #[test]
+    fn list_with_ref_type() {
+        let expr = dare::TypeParser::new().parse("List<Foo>").unwrap();
+        assert_eq!(
+            expr,
+            Type::Builtin(Builtin::List(Box::new(make_generic("Foo", vec![])))),
+        );
+    }
+
+    #[test]
+    fn list_with_parameter() {
+        let expr = dare::TypeParser::new().parse("List<Foo<Int>>").unwrap();
+        assert_eq!(
+            expr,
+            Type::Builtin(Builtin::List(Box::new(Type::Reference(RefType {
+                name: "Foo".to_string(),
+                type_parameters: vec![Type::Atomic(AtomicType::Int)]
+            })))),
+        );
+    }
+
+    #[test]
+    fn optional_full() {
+        let expr_full = dare::TypeParser::new().parse("Option<String>").unwrap();
+        let expected = Type::Builtin(Builtin::Optional(Box::new(Type::Atomic(AtomicType::Str))));
+        assert_eq!(expr_full, expected);
+    }
+
+    #[test]
+    fn optional_short() {
+        let expr_short = dare::TypeParser::new().parse("String ?").unwrap();
+        let expected = Type::Builtin(Builtin::Optional(Box::new(Type::Atomic(AtomicType::Str))));
+        assert_eq!(expr_short, expected);
+    }
+
+    #[test]
+    fn optional_complex_type() {
+        let expr_short = dare::TypeParser::new().parse("Foo<Int>?").unwrap();
+        let expected = Type::Builtin(Builtin::Optional(Box::new(make_generic(
+            "Foo",
+            vec![Type::Atomic(AtomicType::Int)],
+        ))));
+        assert_eq!(expr_short, expected);
+    }
+
+    #[test]
+    fn map_simple() {
+        let expr = dare::TypeParser::new().parse("Map<String, Foo>").unwrap();
+        let expected = Type::Builtin(Builtin::Map(
+            Box::new(Type::Atomic(AtomicType::Str)),
+            Box::new(make_generic("Foo", vec![])),
+        ));
+        assert_eq!(expr, expected)
+    }
+
+    fn make_generic(name: &str, params: Vec<Type>) -> Type {
+        Type::Reference(RefType {
+            name: name.to_string(),
+            type_parameters: params,
+        })
     }
 }

@@ -9,6 +9,7 @@ use crate::ast::{
   VariantValue,
   TopDeclaration,
   Alias,
+  Builtin,
 };
 
 grammar;
@@ -41,57 +42,36 @@ pub Alias: Alias = {
   }
 }
 
-pub AtomicType: AtomicType = {
-  "String" => AtomicType::Str,
-  "UInt" => AtomicType::UInt,
-  "Int" => AtomicType::Int,
-  "Int8" => AtomicType::Int8,
-  "Int16" => AtomicType::Int16,
-  "Int32" => AtomicType::Int32,
-  "Int64" => AtomicType::Int64,
-  "UInt8" => AtomicType::UInt8,
-  "UInt16" => AtomicType::UInt16,
-  "UInt32" => AtomicType::UInt32,
-  "UInt64" => AtomicType::UInt64,
-  "Float" => AtomicType::Float,
-  "Bool" => AtomicType::Bool,
-  "Bytes" => AtomicType::Bytes,
-}
-
 pub RefType: RefType = {
-  <Word> => RefType {
-    name: <>.to_string(),
-    type_parameters: vec![],
-  },
-
-  <n:Word> "<" <params:Comma<Type>> ">" => RefType {
+  <n:Word> <params:("<" <Comma<Type>> ">")?> => RefType {
     name: n.to_string(),
-    type_parameters: params,
+    type_parameters: params.unwrap_or(vec![]),
   },
 }
 
-// comma separated vector of T, with optional trailing comma
-Comma<T>: Vec<T> = {
-    <v:(<T> ",")*> <e:T?> => match e {
-        None => v,
-        Some(e) => {
-            let mut v = v;
-            v.push(e);
-            v
-        }
-    }
-};
-
-Field: Field = {
+pub Field: Field = {
   <name:word> ":" <typ: Type> => Field {
     name: name.to_string(),
     typ,
   },
 }
 
-Type: Type = {
+pub Type: Type = {
   <atom:AtomicType> => Type::Atomic(atom),
-  <Word> => Type::Generic(<>.to_string()),
+  <n:Word> <types:("<" <Comma<Type>> ">")?> => Type::Reference(RefType {
+    name: n.to_string(),
+    type_parameters: types.unwrap_or(vec![]),
+  }),
+
+  "List<" <typ:Type> ">" => Type::Builtin(Builtin::List(Box::new(typ))),
+
+  "Option<" <typ:Type> ">" => Type::Builtin(Builtin::Optional(Box::new(typ))),
+  <typ:Type>"?" => Type::Builtin(Builtin::Optional(Box::new(typ))),
+
+  "Map<" <key:Type> "," <val:Type> ">" => Type::Builtin(Builtin::Map(
+    Box::new(key),
+    Box::new(val),
+  )),
 }
 
 
@@ -119,10 +99,42 @@ VariantValue: VariantValue = {
 }
 
 
+pub AtomicType: AtomicType = {
+  "String" => AtomicType::Str,
+  "UInt" => AtomicType::UInt,
+  "Int" => AtomicType::Int,
+  "Int8" => AtomicType::Int8,
+  "Int16" => AtomicType::Int16,
+  "Int32" => AtomicType::Int32,
+  "Int64" => AtomicType::Int64,
+  "UInt8" => AtomicType::UInt8,
+  "UInt16" => AtomicType::UInt16,
+  "UInt32" => AtomicType::UInt32,
+  "UInt64" => AtomicType::UInt64,
+  "Float" => AtomicType::Float,
+  "Bool" => AtomicType::Bool,
+  "Bytes" => AtomicType::Bytes,
+}
+
+// comma separated vector of T, with optional trailing comma
+Comma<T>: Vec<T> = {
+    <v:(<T> ",")*> <e:T?> => match e {
+        None => v,
+        Some(e) => {
+            let mut v = v;
+            v.push(e);
+            v
+        }
+    }
+};
+
 match {
   "struct",
   "enum",
   "type",
+  "List",
+  "Map",
+  "Option",
   "String",
   "UInt",
   "Int",

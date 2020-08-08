@@ -45,7 +45,6 @@ pub struct Enum {
     pub variants: Vec<EnumVariant>,
 }
 
-
 /// type MaybeInt = Maybe<Int>
 #[derive(Debug, PartialEq, Eq)]
 pub struct Alias {
@@ -72,7 +71,7 @@ pub enum VariantValue {
 pub enum Type {
     Atomic(AtomicType),
     Reference(RefType),
-    Generic(String),
+    Builtin(Builtin),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -100,6 +99,12 @@ pub struct RefType {
     pub type_parameters: Vec<Type>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum Builtin {
+    List(Box<Type>),
+    Optional(Box<Type>),
+    Map(Box<Type>, Box<Type>),
+}
 
 /*
  * struct Foo<A,B> {
