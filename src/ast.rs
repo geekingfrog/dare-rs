@@ -118,14 +118,14 @@ pub enum Builtin {
     Map(Box<Type>, Box<Type>),
 }
 
-pub fn location(start: usize, end: usize) -> SrcSpan {
-    SrcSpan { start, end }
-}
-
 #[derive(Debug, PartialEq, Eq, Default, Clone)]
 pub struct SrcSpan {
     pub start: usize,
     pub end: usize,
+}
+
+pub fn location(start: usize, end: usize) -> SrcSpan {
+    SrcSpan { start, end }
 }
 
 /*
