@@ -25,7 +25,7 @@ pub struct Struct {
 /// field3: Bar<T>,
 /// field4: Bar<Int>,
 /// field5: Bar<Map<String, V>>
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Field {
     pub location: SrcSpan,
     pub name: String,
@@ -72,12 +72,12 @@ pub enum VariantValue {
 
 /// A type can be atomic (String, Bool, Int…), a reference to another type
 /// (Foo, Bar<T>, Map<String, Int>), or a generic type like `T` or `errorType`.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Type {
     /// One of the basic atomic type
     Atomic(AtomicType),
     /// Generic type or reference to existing type
-    /// like List<Foo, T, Bar<Int>>
+    /// like Barf<Foo, T, Bar<Int>>
     Reference(RefType),
     /// Anonymous structure like List<{foo: Int}>
     Anonymous(Vec<Field>),
@@ -85,7 +85,7 @@ pub enum Type {
     Builtin(Builtin),
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum AtomicType {
     Str,
     UInt,
@@ -104,14 +104,14 @@ pub enum AtomicType {
 }
 
 /// A reference to another type. Like Foo, or Bar<T>
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RefType {
     pub location: SrcSpan,
     pub name: String,
     pub type_parameters: Vec<Type>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Builtin {
     List(Box<Type>),
     Optional(Box<Type>),
