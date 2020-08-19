@@ -1,3 +1,8 @@
+################################################################################
+# Everything below is the python prelude, automatically inserted
+# by the dare compiler.
+################################################################################
+
 class ValidationError(Exception):
     def __init__(
         self, message: Union[str, List[Any], Dict[str, Any]], data: Optional[Any] = None

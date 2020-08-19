@@ -37,6 +37,24 @@
           "name": "Charlie",
           "nicks": []
         }
+      },
+      {
+        "description": "Invalid type in a list",
+        "valid": false,
+        "data": {
+          "name": "Charlie",
+          "age": 12,
+          "nicks": ["hello"]
+        }
+      },
+      {
+        "description": "Invalid type in a nested list",
+        "valid": false,
+        "data": {
+          "name": "Charlie",
+          "age": 12,
+          "nicks": [[42]]
+        }
       }
     ],
     "Student": [
