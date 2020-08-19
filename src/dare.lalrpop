@@ -15,6 +15,10 @@ use crate::ast::{
 
 grammar;
 
+pub TopDeclarations: Vec<TopDeclaration> = {
+  TopDeclaration* => <>,
+}
+
 pub TopDeclaration: TopDeclaration = {
   Struct => TopDeclaration::Struct(<>),
   Enum => TopDeclaration::Enum(<>),
