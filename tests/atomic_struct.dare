@@ -4,3 +4,7 @@ struct Customer {
   age: Int,
   nicks: [[String]],
 }
+
+struct Student {
+  marks: Map<String, List<Int>>,
+}

@@ -1,41 +1,77 @@
 {
   "description": "simple struct with only atomic and builtin types",
   "schema": "atomic_struct.dare",
-  "tests": [
-    {
-      "description": "valid struct",
-      "valid": true,
-      "data": {
-        "name": "Charlie",
-        "email": "legit-email@foo.com",
-        "age": 42,
-        "nicks": [
-          [
-            "one"
-          ],
-          [
-            "two",
-            "three"
+  "tests": {
+    "Customer": [
+      {
+        "description": "valid struct",
+        "valid": true,
+        "data": {
+          "name": "Charlie",
+          "email": "legit-email@foo.com",
+          "age": 42,
+          "nicks": [
+            [
+              "one"
+            ],
+            [
+              "two",
+              "three"
+            ]
           ]
-        ]
+        }
+      },
+      {
+        "description": "valid struct without optional field",
+        "valid": true,
+        "data": {
+          "name": "Charlie",
+          "age": 42,
+          "nicks": []
+        }
+      },
+      {
+        "description": "missing field",
+        "valid": false,
+        "data": {
+          "name": "Charlie",
+          "nicks": []
+        }
       }
-    },
-    {
-      "description": "valid struct without optional field",
-      "valid": true,
-      "data": {
-        "name": "Charlie",
-        "age": 42,
-        "nicks": []
+    ],
+    "Student": [
+      {
+        "description": "valid empty map",
+        "valid": true,
+        "data": {
+          "marks": {}
+        }
+      },
+      {
+        "description": "valid map with some entries",
+        "valid": true,
+        "data": {
+          "marks": {
+            "math": [],
+            "history": [
+              94,
+              42
+            ]
+          }
+        }
+      },
+      {
+        "description": "some invalid nested entries",
+        "valid": false,
+        "data": {
+          "marks": {
+            "history": [
+              23,
+              "oops"
+            ]
+          }
+        }
       }
-    },
-    {
-      "description": "missing field",
-      "valid": false,
-      "data": {
-        "name": "Charlie",
-        "nicks": []
-      }
-    }
-  ]
+    ]
+  }
 }

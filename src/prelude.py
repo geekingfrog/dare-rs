@@ -88,7 +88,10 @@ def parse_map(
                 if k not in errors:
                     errors[k] = {}
                 errors[k]["value"] = e.messages
-            result[key] = val
+
+            if k not in errors:
+                result[key] = val
+
     elif isinstance(x, list):
         for idx, val in enumerate(x):
             if not isinstance(val, list):
@@ -98,19 +101,22 @@ def parse_map(
                     "value": ["List must have 2 elements (one key, one value)"]
                 }
             else:
+                stridx = str(idx)
                 k, v = val
                 try:
                     key = parse_key(k)
                 except ValidationError as e:
-                    errors[str(idx)] = {"key": e.messages}
+                    errors[stridx] = {"key": e.messages}
 
                 try:
                     val = parse_val(v)
                 except ValidationError as e:
                     if k not in errors:
-                        errors[str(idx)] = {}
-                    errors[str(idx)]["value"] = e.messages
-                result[key] = val
+                        errors[stridx] = {}
+                    errors[stridx]["value"] = e.messages
+
+                if stridx not in errors:
+                    result[key] = val
 
     else:
         raise ValidationError(message="Not a dictionnary or array of tuple")

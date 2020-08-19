@@ -16,7 +16,11 @@ pub fn gen_python(decls: &Vec<ast::TopDeclaration>) -> Vec<PyToken> {
     tokens.push(imports);
     tokens.push(PyToken::NewLine);
     tokens.push(PyToken::NewLine);
-    tokens.extend(code_tokens);
+    tokens.extend(intersperce(PyToken::NewLine, code_tokens));
+
+    tokens.push(PyToken::NewLine);
+    tokens.push(SRC_PYTHON_PRELUDE.into());
+
     tokens
 }
 
@@ -36,8 +40,6 @@ fn gen_python_top_decl(decl: &ast::TopDeclaration) -> Vec<PyToken> {
     };
     tokens.extend(decl_tokens);
     tokens.push(PyToken::NewLine);
-
-    tokens.push(SRC_PYTHON_PRELUDE.into());
 
     tokens
 }
@@ -202,10 +204,7 @@ fn gen_py_alias(_a: &Alias) -> Vec<PyToken> {
 }
 
 fn gather_imports(tokens: &Vec<PyToken>) -> ImportMap {
-    let mut import_map = ImportMap {
-        imports: BTreeMap::new(),
-        with_fallbacks: Vec::new(),
-    };
+    let mut import_map = ImportMap::default();
 
     // include the imports coming from the "stdlib", code not generated
     // but automatically included
@@ -239,7 +238,8 @@ fn gather_imports(tokens: &Vec<PyToken>) -> ImportMap {
         match tok {
             PyToken::Import(imp, _) => match imp {
                 PyImport::Full(name) => {
-                    let entry = import_map.imports
+                    let entry = import_map
+                        .imports
                         .entry(name.as_str())
                         .or_insert(ImportEntry::default());
                     entry.full = true;
@@ -249,7 +249,7 @@ fn gather_imports(tokens: &Vec<PyToken>) -> ImportMap {
                     entry.specifics.push(name);
                 }
                 PyImport::Try(prim_module, fallback_module, name) => {
-                    import_map.with_fallbacks.push((
+                    import_map.with_fallbacks.insert((
                         prim_module.as_ref(),
                         fallback_module.as_ref(),
                         name.as_ref(),
@@ -292,7 +292,11 @@ fn parse_function(t: &Type, name: &str, depth: u8) -> String {
                     format!("lambda x{}: parse_list({}, x{})", depth, nested, depth)
                 }
             }
-            Builtin::Map(_, _) => todo!(),
+            Builtin::Map(key_type, val_type) => {
+                let parse_key_fn = parse_function(key_type, "key_name?", depth+1);
+                let parse_val_fn = parse_function(val_type, "val_name?", depth+1);
+                format!("parse_map({}, {}, {})", parse_key_fn, parse_val_fn, name)
+            },
         },
         Type::Reference(_) => todo!(),
         Type::Anonymous(_) => todo!(),
@@ -481,7 +485,7 @@ struct FormatContext {
 #[derive(Default, Debug)]
 struct ImportMap<'tokens> {
     imports: BTreeMap<&'tokens str, ImportEntry<'tokens>>,
-    with_fallbacks: Vec<(&'tokens str, &'tokens str, &'tokens str)>,
+    with_fallbacks: BTreeSet<(&'tokens str, &'tokens str, &'tokens str)>,
 }
 
 impl<'tokens> ImportMap<'tokens> {
@@ -492,7 +496,8 @@ impl<'tokens> ImportMap<'tokens> {
                 .and_modify(|e| e.merge(&mut imp))
                 .or_insert(imp.clone());
         }
-        self.with_fallbacks.extend(other.with_fallbacks.iter().cloned());
+        self.with_fallbacks
+            .extend(other.with_fallbacks.iter().cloned());
     }
 }
 

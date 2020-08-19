@@ -17,12 +17,25 @@ def gather_tests(spec_name):
 
 @pytest.mark.parametrize(
     "test_spec",
-    gather_tests("../atomic_struct_spec.json"),
+    gather_tests("../atomic_struct_spec.json")["Customer"],
     ids=itemgetter("description"),
 )
-def test_atomic_struct(test_spec):
+def test_atomic_struct_customer(test_spec):
     if test_spec["valid"]:
         atomic_struct.Customer.from_json(test_spec["data"])
     else:
         with pytest.raises(atomic_struct.ValidationError):
             atomic_struct.Customer.from_json(test_spec["data"])
+
+
+@pytest.mark.parametrize(
+    "test_spec",
+    gather_tests("../atomic_struct_spec.json")["Student"],
+    ids=itemgetter("description"),
+)
+def test_atomic_struct_student(test_spec):
+    if test_spec["valid"]:
+        atomic_struct.Student.from_json(test_spec["data"])
+    else:
+        with pytest.raises(atomic_struct.ValidationError):
+            atomic_struct.Student.from_json(test_spec["data"])
