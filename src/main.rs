@@ -1,20 +1,45 @@
-pub mod ast;
-pub mod dare;
-mod python;
-
 #[macro_use]
 extern crate anyhow;
 use anyhow::Result;
 
 use std::fs::File;
 use std::io::{prelude::*, BufReader};
+use structopt::StructOpt;
+use std::path::{self, PathBuf};
+
+mod python;
+mod ast;
+mod dare;
+
+#[derive(StructOpt, Debug)]
+// #[structopt(name = "basic")]
+struct Opt {
+    #[structopt(long)]
+    schema: PathBuf,
+
+    #[structopt(long)]
+    target_dir: Option<PathBuf>
+}
 
 fn main() {
-    let f = File::open("coucou.dare").unwrap();
+    let mut opt = Opt::from_args();
+    println!("{:#?}", opt);
+
+    let f = File::open(&opt.schema).unwrap();
     let result = parse(&f).unwrap();
 
+    let mut dest_path_default = opt.schema.clone();
+    dest_path_default.pop();
+    let mut dest_path = opt.target_dir.unwrap_or(dest_path_default);
+    dest_path.push(&opt.schema.file_stem().unwrap());
+    dest_path.set_extension("py");
+
+    println!("writing result to {:?}", dest_path);
+
     let py_tokens = python::gen_python(&result);
-    println!("{}", python::render_python(&py_tokens));
+    let mut dest = File::create(&dest_path).unwrap();
+    dest.write_all(&python::render_python(&py_tokens).as_bytes()).unwrap();
+    // println!("{}", python::render_python(&py_tokens));
 }
 
 fn parse(f: &File) -> Result<Vec<ast::TopDeclaration>> {

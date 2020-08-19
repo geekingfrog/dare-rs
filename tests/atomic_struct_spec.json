@@ -1,0 +1,41 @@
+{
+  "description": "simple struct with only atomic and builtin types",
+  "schema": "atomic_struct.dare",
+  "tests": [
+    {
+      "description": "valid struct",
+      "valid": true,
+      "data": {
+        "name": "Charlie",
+        "email": "legit-email@foo.com",
+        "age": 42,
+        "nicks": [
+          [
+            "one"
+          ],
+          [
+            "two",
+            "three"
+          ]
+        ]
+      }
+    },
+    {
+      "description": "valid struct without optional field",
+      "valid": true,
+      "data": {
+        "name": "Charlie",
+        "age": 42,
+        "nicks": []
+      }
+    },
+    {
+      "description": "missing field",
+      "valid": false,
+      "data": {
+        "name": "Charlie",
+        "nicks": []
+      }
+    }
+  ]
+}

@@ -7,10 +7,15 @@ pub const SRC_PYTHON_PRELUDE: &'static str = include_str!("prelude.py");
 
 #[allow(dead_code)]
 pub fn gen_python(decls: &Vec<ast::TopDeclaration>) -> Vec<PyToken> {
-    let code_tokens: Vec<PyToken> = decls.iter().map(|decl| PyToken::Block(gen_python_top_decl(decl))).collect();
-    let imports = py_import(gather_imports(&code_tokens));
+    let code_tokens: Vec<PyToken> = decls
+        .iter()
+        .map(|decl| PyToken::Block(gen_python_top_decl(decl)))
+        .collect();
+    let imports = py_imports(gather_imports(&code_tokens));
     let mut tokens = vec![];
     tokens.push(imports);
+    tokens.push(PyToken::NewLine);
+    tokens.push(PyToken::NewLine);
     tokens.extend(code_tokens);
     tokens
 }
@@ -39,10 +44,7 @@ fn gen_python_top_decl(decl: &ast::TopDeclaration) -> Vec<PyToken> {
 
 fn gen_py_struct(s: &Struct) -> Vec<PyToken> {
     let mut tokens = Vec::new();
-    let td = PyToken::Import(
-        PyImport::Specific("typing_extensions".to_string(), "TypedDict".to_string()),
-        None,
-    );
+    let td = PyToken::Import(try_import("TypedDict", "typing", "typing_extensions"), None);
 
     let attributes = intersperce(
         PyToken::NewLine,
@@ -199,37 +201,37 @@ fn gen_py_alias(_a: &Alias) -> Vec<PyToken> {
     todo!("gen py alias")
 }
 
-fn gather_imports(tokens: &Vec<PyToken>) -> BTreeMap<&str, ImportMap> {
-    let mut imports = BTreeMap::new();
+fn gather_imports(tokens: &Vec<PyToken>) -> ImportMap {
+    let mut import_map = ImportMap {
+        imports: BTreeMap::new(),
+        with_fallbacks: Vec::new(),
+    };
 
     // include the imports coming from the "stdlib", code not generated
     // but automatically included
-    imports.insert(
+    import_map.imports.insert(
         "typing",
-        ImportMap {
+        ImportEntry {
             full: false,
             specifics: vec![
                 "TypeVar", "Any", "cast", "Dict", "List", "Optional", "Callable", "Union",
             ],
-            aliased: vec![],
         },
     );
 
-    imports.insert(
+    import_map.imports.insert(
         "base64",
-        ImportMap {
+        ImportEntry {
             full: true,
             specifics: vec![],
-            aliased: vec![],
         },
     );
 
-    imports.insert(
+    import_map.imports.insert(
         "binascii",
-        ImportMap {
+        ImportEntry {
             full: true,
             specifics: vec![],
-            aliased: vec![],
         },
     );
 
@@ -237,30 +239,30 @@ fn gather_imports(tokens: &Vec<PyToken>) -> BTreeMap<&str, ImportMap> {
         match tok {
             PyToken::Import(imp, _) => match imp {
                 PyImport::Full(name) => {
-                    let entry = imports.entry(name.as_str()).or_insert(ImportMap::default());
+                    let entry = import_map.imports
+                        .entry(name.as_str())
+                        .or_insert(ImportEntry::default());
                     entry.full = true;
                 }
                 PyImport::Specific(module, name) => {
-                    let entry = imports.entry(module.as_str()).or_default();
+                    let entry = import_map.imports.entry(module.as_str()).or_default();
                     entry.specifics.push(name);
                 }
-                PyImport::Alias(name, alias) => {
-                    let entry = imports.entry(name.as_str()).or_default();
-                    entry.aliased.push(alias);
+                PyImport::Try(prim_module, fallback_module, name) => {
+                    import_map.with_fallbacks.push((
+                        prim_module.as_ref(),
+                        fallback_module.as_ref(),
+                        name.as_ref(),
+                    ));
                 }
             },
             PyToken::Block(nested_tokens) => {
-                for (name, mut imp) in gather_imports(nested_tokens) {
-                    imports
-                        .entry(name)
-                        .and_modify(|e| e.merge(&mut imp))
-                        .or_insert(imp);
-                }
+                import_map.merge(&mut gather_imports(nested_tokens));
             }
             _ => (),
         }
     }
-    imports
+    import_map
 }
 
 fn parse_function(t: &Type, name: &str, depth: u8) -> String {
@@ -374,12 +376,20 @@ fn render(conf: &PyConfig, mut ctx: &mut FormatContext, tokens: &Vec<PyToken>) -
 pub enum PyImport {
     /// import json
     Full(String),
+
+    /// Specific("typing".to_string(), "Any".to_string())
     /// from typing import Any
     Specific(String, String),
-    /// import typing as t
-    #[allow(dead_code)]
-    Alias(String, String),
-    // Try(Vec<String>),
+
+    /// when an import could fail, but there's a fallback
+    /// clearly not meant for general python import-fu, but
+    /// enough for this codegen usecase
+    /// Try("typing".to_string(), "typing_extensions".to_string(), "TypedDict")
+    /// try:
+    ///     from typing import TypedDict
+    /// except ImportError:
+    ///     from typing_extensions import TypedDict
+    Try(String, String, String),
 }
 
 impl PyImport {
@@ -388,7 +398,7 @@ impl PyImport {
         match self {
             PyImport::Full(s) => s.to_string(),
             PyImport::Specific(_, s) => s.to_string(),
-            PyImport::Alias(_, s) => s.to_string(),
+            PyImport::Try(_, _, s) => s.to_string(),
         }
     }
 }
@@ -470,13 +480,30 @@ struct FormatContext {
 /// Map of imports generated from the tokens
 #[derive(Default, Debug)]
 struct ImportMap<'tokens> {
-    full: bool,
-    specifics: Vec<&'tokens str>,
-    aliased: Vec<&'tokens str>,
+    imports: BTreeMap<&'tokens str, ImportEntry<'tokens>>,
+    with_fallbacks: Vec<(&'tokens str, &'tokens str, &'tokens str)>,
 }
 
 impl<'tokens> ImportMap<'tokens> {
     fn merge<'tok>(&mut self, other: &'tok mut ImportMap<'tokens>) {
+        for (name, mut imp) in other.imports.iter_mut() {
+            self.imports
+                .entry(name)
+                .and_modify(|e| e.merge(&mut imp))
+                .or_insert(imp.clone());
+        }
+        self.with_fallbacks.extend(other.with_fallbacks.iter().cloned());
+    }
+}
+
+#[derive(Default, Debug, Clone)]
+struct ImportEntry<'tokens> {
+    full: bool,
+    specifics: Vec<&'tokens str>,
+}
+
+impl<'tokens> ImportEntry<'tokens> {
+    fn merge<'tok>(&mut self, other: &'tok mut ImportEntry<'tokens>) {
         self.full = self.full || other.full;
 
         let mut s: BTreeSet<&'tokens str> = BTreeSet::new();
@@ -487,15 +514,6 @@ impl<'tokens> ImportMap<'tokens> {
             s.insert(t);
         }
         self.specifics = s.into_iter().collect();
-
-        s = BTreeSet::new();
-        for t in &self.aliased {
-            s.insert(t);
-        }
-        for t in &other.aliased {
-            s.insert(t);
-        }
-        self.aliased = s.into_iter().collect();
     }
 }
 
@@ -560,6 +578,14 @@ fn py_fn(
     tokens.push(indent(-1));
 
     tokens
+}
+
+fn try_import(sym: &str, primary_source: &str, fallback: &str) -> PyImport {
+    PyImport::Try(
+        primary_source.to_string(),
+        fallback.to_string(),
+        sym.to_string(),
+    )
 }
 
 /// An attribute or function argument declaration
@@ -636,9 +662,9 @@ fn type_import(typ: &str) -> PyToken {
     PyToken::Import(typ, None)
 }
 
-fn py_import(imports: BTreeMap<&str, ImportMap>) -> PyToken {
+fn py_imports(im: ImportMap) -> PyToken {
     let mut toks = vec![];
-    for (imp_name, imp_map) in imports {
+    for (imp_name, imp_map) in im.imports {
         let mut ts = vec![];
         if imp_map.full {
             ts.push(PyToken::Raw(format!("import {}", imp_name)));
@@ -652,13 +678,25 @@ fn py_import(imports: BTreeMap<&str, ImportMap>) -> PyToken {
             ts.push(PyToken::NewLine);
         }
 
-        for alias in imp_map.aliased {
-            ts.push(PyToken::Raw(format!("import {} as {}", imp_name, alias)));
-            ts.push(PyToken::NewLine);
-        }
-
         toks.push(PyToken::Block(ts));
     }
+
+    let mut fallbacks_blocks = Vec::new();
+    for (prim_module, fallback_module, sym) in im.with_fallbacks {
+        fallbacks_blocks.push(PyToken::Block(vec![
+            "try:".into(),
+            indent(1),
+            format!("from {} import {}", prim_module, sym).into(),
+            indent(-1),
+            "except ImportError:".into(),
+            indent(1),
+            format!("from {} import {}", fallback_module, sym).into(),
+            indent(-1),
+        ]));
+    }
+
+    toks.push(PyToken::NewLine);
+    toks.extend(fallbacks_blocks);
     PyToken::Block(toks)
 }
 
