@@ -1,6 +1,6 @@
 struct Customer {
   name: String,
-  email: String?,
+  customerEmail: String?,
   age: Int,
   nicks: [[String]],
 }

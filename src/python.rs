@@ -1,12 +1,13 @@
 use crate::ast;
 use crate::ast::{Alias, AtomicType, Builtin, Enum, Field, Struct, TopDeclaration, Type};
+use inflections::Inflect;
 use std::collections::{BTreeMap, BTreeSet};
 use std::convert::From;
 
 pub const SRC_PYTHON_PRELUDE: &'static str = include_str!("prelude.py");
 
 #[allow(dead_code)]
-pub fn gen_python(decls: &Vec<ast::TopDeclaration>) -> Vec<PyToken> {
+pub fn gen_python(decls: &[ast::TopDeclaration]) -> Vec<PyToken> {
     let code_tokens: Vec<PyToken> = decls
         .iter()
         .map(|decl| PyToken::Block(gen_python_top_decl(decl)))
@@ -24,7 +25,7 @@ pub fn gen_python(decls: &Vec<ast::TopDeclaration>) -> Vec<PyToken> {
     tokens
 }
 
-pub fn render_python(tokens: &Vec<PyToken>) -> String {
+pub fn render_python(tokens: &[PyToken]) -> String {
     let config = PyConfig { indent_size: 4 };
     let mut ctx = FormatContext::default();
     render(&config, &mut ctx, tokens)
@@ -67,7 +68,7 @@ fn gen_py_struct(s: &Struct) -> Vec<PyToken> {
     let mut init_args = vec!["self".into()];
     init_args.extend(s.fields.iter().map(|f| {
         typed_attr(
-            &f.name,
+            &f.name.to_snake_case(),
             vec![Type::Builtin(Builtin::Optional(Box::new(unpack_optional(f.typ.clone())))).into()],
             None,
         )
@@ -78,16 +79,17 @@ fn gen_py_struct(s: &Struct) -> Vec<PyToken> {
     init_body.push(PyToken::NewLine);
 
     for field in &s.fields {
+        let name = &field.name.to_snake_case();
         init_body.push(PyToken::NewLine);
 
         init_body.push("try:".into());
         init_body.push(indent(1));
-        let parse_fn = parse_function(&field.typ, &field.name, 0);
-        init_body.push(format!("self.{} = {}", field.name, parse_fn).into());
+        let parse_fn = parse_function(&field.typ, &name, 0);
+        init_body.push(format!("self.{} = {}", name, parse_fn).into());
         init_body.push(indent(-1));
         init_body.push("except ValidationError as e:".into());
         init_body.push(indent(1));
-        init_body.push(format!("errors[\"{}\"] = e.messages", field.name).into());
+        init_body.push(format!("errors[\"{}\"] = e.messages", name).into());
         init_body.push(indent(-1));
     }
 
@@ -137,7 +139,6 @@ fn gen_py_struct(s: &Struct) -> Vec<PyToken> {
     let args = intersperce(", ".into(), args);
 
     from_json_body.extend(vec!["return cls(".into(), PyToken::Block(args), ")".into()]);
-    // return cls(data.get("name"), data.get("email"), data.get("age"),)
 
     from_json_body.extend(vec![
         indent(-1),
@@ -151,7 +152,7 @@ fn gen_py_struct(s: &Struct) -> Vec<PyToken> {
 
     let from_json = py_fn(
         "from_json",
-        vec!["cls".into(), typed_attr("data", vec![any.clone()], None)],
+        vec!["cls".into(), typed_attr("data", vec![any], None)],
         from_json_body,
         Some(format!("\"{}\"", s.name).into()),
     );
@@ -169,7 +170,7 @@ fn gen_py_struct(s: &Struct) -> Vec<PyToken> {
                 PyToken::NewLine,
                 s.fields
                     .iter()
-                    .map(|f| format!("\"{}\": self.{},", f.name, f.name).into())
+                    .map(|f| format!("\"{}\": self.{},", f.name, f.name.to_snake_case()).into())
                     .collect(),
             )),
             indent(-1),
@@ -195,7 +196,11 @@ fn gen_py_struct(s: &Struct) -> Vec<PyToken> {
     tokens
 }
 
-fn gen_py_enum(_e: &Enum) -> Vec<PyToken> {
+fn gen_py_enum(e: &Enum) -> Vec<PyToken> {
+    if !e.type_parameters.is_empty() {
+        panic!("Enum with type parameters not supported yet");
+    }
+    println!("{:#?}", e);
     todo!("gen py enum")
 }
 
@@ -203,7 +208,7 @@ fn gen_py_alias(_a: &Alias) -> Vec<PyToken> {
     todo!("gen py alias")
 }
 
-fn gather_imports(tokens: &Vec<PyToken>) -> ImportMap {
+fn gather_imports(tokens: &[PyToken]) -> ImportMap {
     let mut import_map = ImportMap::default();
 
     // include the imports coming from the "stdlib", code not generated
@@ -241,7 +246,7 @@ fn gather_imports(tokens: &Vec<PyToken>) -> ImportMap {
                     let entry = import_map
                         .imports
                         .entry(name.as_str())
-                        .or_insert(ImportEntry::default());
+                        .or_insert_with(ImportEntry::default);
                     entry.full = true;
                 }
                 PyImport::Specific(module, name) => {
@@ -293,10 +298,10 @@ fn parse_function(t: &Type, name: &str, depth: u8) -> String {
                 }
             }
             Builtin::Map(key_type, val_type) => {
-                let parse_key_fn = parse_function(key_type, "key_name?", depth+1);
-                let parse_val_fn = parse_function(val_type, "val_name?", depth+1);
+                let parse_key_fn = parse_function(key_type, "key_name?", depth + 1);
+                let parse_val_fn = parse_function(val_type, "val_name?", depth + 1);
                 format!("parse_map({}, {}, {})", parse_key_fn, parse_val_fn, name)
-            },
+            }
         },
         Type::Reference(_) => todo!(),
         Type::Anonymous(_) => todo!(),
@@ -327,10 +332,10 @@ impl From<If> for PyToken {
     }
 }
 
-fn render(conf: &PyConfig, mut ctx: &mut FormatContext, tokens: &Vec<PyToken>) -> String {
+fn render(conf: &PyConfig, mut ctx: &mut FormatContext, tokens: &[PyToken]) -> String {
     let mut buf: Vec<String> = Vec::new();
 
-    for tok in tokens.into_iter() {
+    for tok in tokens.iter() {
         match tok.clone() {
             PyToken::Raw(s) => {
                 if ctx.should_indent && ctx.indent_level > 0 {
@@ -494,7 +499,7 @@ impl<'tokens> ImportMap<'tokens> {
             self.imports
                 .entry(name)
                 .and_modify(|e| e.merge(&mut imp))
-                .or_insert(imp.clone());
+                .or_insert_with(|| imp.clone());
         }
         self.with_fallbacks
             .extend(other.with_fallbacks.iter().cloned());
@@ -597,7 +602,7 @@ fn try_import(sym: &str, primary_source: &str, fallback: &str) -> PyImport {
 /// foo: int = 3
 fn typed_attr(name: &str, typ: Vec<PyToken>, default_val: Option<PyToken>) -> PyToken {
     let mut tokens = Vec::new();
-    tokens.push(name.into());
+    tokens.push(name.to_snake_case().into());
     if !typ.is_empty() {
         tokens.push(": ".into());
         tokens.extend(typ);

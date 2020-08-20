@@ -3,6 +3,7 @@
 # by the dare compiler.
 ################################################################################
 
+
 class ValidationError(Exception):
     def __init__(
         self, message: Union[str, List[Any], Dict[str, Any]], data: Optional[Any] = None
@@ -46,7 +47,7 @@ def parse_bytes(x: Any) -> bytes:
     try:
         return base64.b64decode(raw)
     except binascii.Error as e:
-        raise ValidationError(message="Invalid base64 encoding")
+        raise ValidationError(message="Invalid base64 encoding: {}".format(e.message))
 
 
 def parse_optional(parse: Callable[[Any], V], val: Any) -> Optional[V]:

@@ -8,7 +8,7 @@
         "valid": true,
         "data": {
           "name": "Charlie",
-          "email": "legit-email@foo.com",
+          "customerEmail": "legit-email@foo.com",
           "age": 42,
           "nicks": [
             [

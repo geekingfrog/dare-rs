@@ -4,7 +4,7 @@ use anyhow::Result;
 
 use std::fs::File;
 use std::io::{prelude::*, BufReader};
-use std::path::{self, PathBuf};
+use std::path::PathBuf;
 use structopt::StructOpt;
 
 mod ast;
@@ -22,7 +22,7 @@ struct Opt {
 }
 
 fn main() {
-    let mut opt = Opt::from_args();
+    let opt = Opt::from_args();
     println!("{:#?}", opt);
 
     let f = File::open(&opt.schema).unwrap();
