@@ -182,12 +182,12 @@ mod test {
                     EnumVariant {
                         location: location(11, 12),
                         name: "A".to_string(),
-                        value: VariantValue::Nothing,
+                        value: VariantValue::OnlyCtor,
                     },
                     EnumVariant {
                         location: location(14, 15),
                         name: "G".to_string(),
-                        value: VariantValue::Nothing,
+                        value: VariantValue::OnlyCtor,
                     }
                 ],
             }
@@ -197,7 +197,7 @@ mod test {
     #[test]
     fn enum_with_atomic_type() {
         let expr = dare::EnumParser::new()
-            .parse("enum MaybeInt {Nothing, Just<Int>}")
+            .parse("enum MaybeInt {Nothing, Just(Int)}")
             .unwrap();
 
         assert_eq!(
@@ -210,12 +210,12 @@ mod test {
                     EnumVariant {
                         location: location(15, 22),
                         name: "Nothing".to_string(),
-                        value: VariantValue::Nothing,
+                        value: VariantValue::OnlyCtor,
                     },
                     EnumVariant {
                         location: location(24, 33),
                         name: "Just".to_string(),
-                        value: VariantValue::Type(vec![Type::Atomic(AtomicType::Int)]),
+                        value: VariantValue::PositionalCtor(vec![Type::Atomic(AtomicType::Int)]),
                     }
                 ],
             }
@@ -225,7 +225,7 @@ mod test {
     #[test]
     fn enum_with_polymorphic_variant() {
         let expr = dare::EnumParser::new()
-            .parse("enum Maybe<T> {Nothing, Just<T>}")
+            .parse("enum Maybe<T> {Nothing, Just(T)}")
             .unwrap();
 
         assert_eq!(
@@ -238,12 +238,12 @@ mod test {
                     EnumVariant {
                         location: location(15, 22),
                         name: "Nothing".to_string(),
-                        value: VariantValue::Nothing,
+                        value: VariantValue::OnlyCtor,
                     },
                     EnumVariant {
                         location: location(24, 31),
                         name: "Just".to_string(),
-                        value: VariantValue::Type(vec![make_generic(
+                        value: VariantValue::PositionalCtor(vec![make_generic(
                             "T",
                             vec![],
                             location(29, 30)
@@ -371,7 +371,7 @@ mod test {
             variants: vec![EnumVariant {
                 location: location(10, 36),
                 name: "Stuff".to_string(),
-                value: VariantValue::Type(vec![Type::Anonymous(vec![
+                value: VariantValue::StructCtor(vec![
                     Field {
                         location: location(16, 23),
                         name: "f1".to_string(),
@@ -382,7 +382,7 @@ mod test {
                         name: "f2".to_string(),
                         typ: Type::Atomic(AtomicType::Str),
                     },
-                ])]),
+                ]),
             }],
         };
         assert_eq!(expr, expected)

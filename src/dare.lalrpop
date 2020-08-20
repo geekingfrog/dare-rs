@@ -109,12 +109,12 @@ EnumVariant: EnumVariant = {
 }
 
 VariantValue: VariantValue = {
-  "{" <fields:Comma<Field>> "}" => VariantValue::Type(
-    vec![Type::Anonymous(fields)]
+  "{" <fields:Comma<Field>> "}" => VariantValue::StructCtor(
+    fields
   ),
-  <x:("<" <Comma<Type>> ">")?> => match x {
-    None => VariantValue::Nothing,
-    Some(typs) => VariantValue::Type(typs),
+  <x:("(" <Comma<Type>> ")")?> => match x {
+    None => VariantValue::OnlyCtor,
+    Some(typs) => VariantValue::PositionalCtor(typs),
   }
 }
 
@@ -176,87 +176,3 @@ match {
   _,
 }
 
-
-
-// pub Struct: Box<Decl> = {
-//   "struct" <name:Identifier> "{" <fields:Comma<Field>> "}" => Box::new(
-//     Decl::Struct(Struct{
-//       name: name.to_string(),
-//       fields,
-//     })
-//   ),
-// }
-// 
-// // pub Enum: Box<Decl> =
-// 
-// Field: Field = {
-//   <name:FieldIdentifier> ":" <typ: Type> => Field{
-//     name: name.to_string(),
-//     typ,
-//   },
-// }
-// 
-// Type: Type = {
-//   "String" => Type::Str,
-//   "UInt" => Type::UInt,
-//   "Int" => Type::Int,
-//   "Int8" => Type::Int8,
-//   "Int16" => Type::Int16,
-//   "Int32" => Type::Int32,
-//   "Int64" => Type::Int64,
-//   "UInt8" => Type::UInt8,
-//   "UInt16" => Type::UInt16,
-//   "UInt32" => Type::UInt32,
-//   "UInt64" => Type::UInt64,
-//   "Float" => Type::Float,
-//   "Bool" => Type::Bool,
-//   "Bytes" => Type::Bytes,
-//   TypeCtor => <>,
-// }
-// 
-// match {
-//   "struct",
-//   "String",
-//   "UInt",
-//   "Int",
-//   "Int8",
-//   "Int16",
-//   "Int32",
-//   "Int64",
-//   "UInt8",
-//   "UInt16",
-//   "UInt32",
-//   "UInt64",
-//   "Float",
-//   "Bool",
-//   "Bytes",
-// } else {
-//   r"[A-Z]\w*" => Word,
-// } else {
-//   r"[a-z]\w*" => word,
-//   _,
-// }
-// 
-// TypeCtor: Type::TypeCtor = {
-//   <Word> "<>" => Type::TypeCtor(<>.to_string(), vec![])
-// }
-// 
-// Identifier: String = {
-//   Word => <>.to_string(),
-// }
-// 
-// FieldIdentifier: String = {
-//   word => <>.to_string(),
-// }
-// 
-// // comma separated vector of T, with optional trailing comma
-// Comma<T>: Vec<T> = {
-//     <v:(<T> ",")*> <e:T?> => match e {
-//         None => v,
-//         Some(e) => {
-//             let mut v = v;
-//             v.push(e);
-//             v
-//         }
-//     }
-// };

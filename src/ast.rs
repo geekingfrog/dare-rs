@@ -34,8 +34,9 @@ pub struct Field {
 
 /// enum Foo = {A, B, C, D}
 /// enum Bar = {String, Int}
-/// enum Maybe<T> = {Nothing, Just<T>}
-/// enum Detailed<A,B> = {Nothing, Something<A,B>}
+/// enum Maybe<T> = {Nothing, Just(T)}
+/// enum Detailed<A,B> = {Nothing, Something(A,B)}
+/// enum WithFields = {A, B{b_val: Int}}
 /// the last example, when monomorphised would give:
 /// ["Detailed", "val_A", val_B""]
 ///  or {"type": "Detailed", "value": ["val_A", "val_B"]}
@@ -65,9 +66,9 @@ pub struct EnumVariant {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum VariantValue {
-    Nothing,
-    Type(Vec<Type>),
-    // TODO: Anonymous struct like: Node{Left: Tree<T>, val: T, Right: Tree<T>}
+    OnlyCtor,
+    PositionalCtor(Vec<Type>),
+    StructCtor(Vec<Field>),
 }
 
 /// A type can be atomic (String, Bool, Int…), a reference to another type
