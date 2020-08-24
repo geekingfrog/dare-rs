@@ -1,5 +1,7 @@
 use crate::ast;
-use crate::ast::{Alias, AtomicType, Builtin, Enum, Field, Struct, TopDeclaration, Type};
+use crate::ast::{
+    Alias, AtomicType, Builtin, Enum, Field, Struct, TopDeclaration, Type, VariantValue, ResolvedReference
+};
 use inflections::Inflect;
 use std::collections::{BTreeMap, BTreeSet};
 use std::convert::From;
@@ -7,10 +9,11 @@ use std::convert::From;
 pub const SRC_PYTHON_PRELUDE: &'static str = include_str!("prelude.py");
 
 #[allow(dead_code)]
-pub fn gen_python(decls: &[ast::TopDeclaration]) -> Vec<PyToken> {
+pub fn gen_python(decls: &[ast::TopDeclaration<ResolvedReference>]) -> Vec<PyToken> {
+    let mut gen_ctx = GenCtx::new();
     let code_tokens: Vec<PyToken> = decls
         .iter()
-        .map(|decl| PyToken::Block(gen_python_top_decl(decl)))
+        .map(|decl| PyToken::Block(gen_python_top_decl(&mut gen_ctx, decl)))
         .collect();
     let imports = py_imports(gather_imports(&code_tokens));
     let mut tokens = vec![];
@@ -19,8 +22,8 @@ pub fn gen_python(decls: &[ast::TopDeclaration]) -> Vec<PyToken> {
     tokens.push(PyToken::NewLine);
     tokens.extend(intersperce(PyToken::NewLine, code_tokens));
 
-    tokens.push(PyToken::NewLine);
-    tokens.push(SRC_PYTHON_PRELUDE.into());
+    // tokens.push(PyToken::NewLine);
+    // tokens.push(SRC_PYTHON_PRELUDE.into());
 
     tokens
 }
@@ -31,12 +34,27 @@ pub fn render_python(tokens: &[PyToken]) -> String {
     render(&config, &mut ctx, tokens)
 }
 
-fn gen_python_top_decl(decl: &ast::TopDeclaration) -> Vec<PyToken> {
+/// A struct used to gather various requirements while
+/// generating the code. Some construct may require addition
+/// to the prelude (like parsing tuples)
+struct GenCtx {
+    tuple_arities: BTreeSet<u8>,
+}
+
+impl GenCtx {
+    fn new() -> Self {
+        GenCtx {
+            tuple_arities: BTreeSet::new(),
+        }
+    }
+}
+
+fn gen_python_top_decl(mut gen_ctx: &mut GenCtx, decl: &ast::TopDeclaration<ResolvedReference>) -> Vec<PyToken> {
     let mut tokens = Vec::new();
 
     let decl_tokens = match decl {
         TopDeclaration::Struct(s) => gen_py_struct(s),
-        TopDeclaration::Enum(e) => gen_py_enum(e),
+        TopDeclaration::Enum(e) => gen_py_enum(&mut gen_ctx, e),
         TopDeclaration::Alias(a) => gen_py_alias(a),
     };
     tokens.extend(decl_tokens);
@@ -45,23 +63,29 @@ fn gen_python_top_decl(decl: &ast::TopDeclaration) -> Vec<PyToken> {
     tokens
 }
 
-fn gen_py_struct(s: &Struct) -> Vec<PyToken> {
+fn gen_py_struct(s: &Struct<ResolvedReference>) -> Vec<PyToken> {
     let mut tokens = Vec::new();
     let td = PyToken::Import(try_import("TypedDict", "typing", "typing_extensions"), None);
 
-    let attributes = intersperce(
+    let dict_attributes = intersperce(
         PyToken::NewLine,
         s.fields.iter().map(|f| typed_field(f)).collect(),
     );
 
     let struct_td_name = format!("{}TypedDict", s.name);
-    let struct_td = pyclass(&struct_td_name, vec![td], attributes.clone());
+    let struct_td = pyclass(&struct_td_name, vec![td], dict_attributes.clone());
     tokens.extend(struct_td);
 
     tokens.push(PyToken::NewLine);
 
     let mut body = vec![];
-    body.extend(attributes);
+    body.extend(intersperce(
+        PyToken::NewLine,
+        s.fields
+            .iter()
+            .map(|f| typed_attr(&f.name.to_snake_case(), vec![f.typ.clone().into()], None))
+            .collect(),
+    ));
     body.push(PyToken::NewLine);
     body.push(PyToken::NewLine);
 
@@ -196,15 +220,27 @@ fn gen_py_struct(s: &Struct) -> Vec<PyToken> {
     tokens
 }
 
-fn gen_py_enum(e: &Enum) -> Vec<PyToken> {
+fn gen_py_enum(mut gen_ctx: &mut GenCtx, e: &Enum<ResolvedReference>) -> Vec<PyToken> {
     if !e.type_parameters.is_empty() {
         panic!("Enum with type parameters not supported yet");
     }
-    println!("{:#?}", e);
-    todo!("gen py enum")
+    // println!("{:#?}", e);
+    let mut tokens = Vec::new();
+    for variant in &e.variants {
+        tokens.push(gen_enum_variant(&mut gen_ctx, &variant));
+        tokens.push(PyToken::NewLine);
+    }
+
+    tokens.push(format!("{}TypeDef = ", e.name).into());
+    tokens.push(typed_union(
+        e.variants.iter().map(|v| v.name.clone().into()).collect(),
+    ));
+    tokens.push(PyToken::NewLine);
+
+    tokens
 }
 
-fn gen_py_alias(_a: &Alias) -> Vec<PyToken> {
+fn gen_py_alias(_a: &Alias<ResolvedReference>) -> Vec<PyToken> {
     todo!("gen py alias")
 }
 
@@ -218,7 +254,7 @@ fn gather_imports(tokens: &[PyToken]) -> ImportMap {
         ImportEntry {
             full: false,
             specifics: vec![
-                "TypeVar", "Any", "cast", "Dict", "List", "Optional", "Callable", "Union",
+                "TypeVar", "Any", "cast", "Dict", "List", "Optional", "Callable", "Union", "Tuple",
             ],
         },
     );
@@ -270,7 +306,7 @@ fn gather_imports(tokens: &[PyToken]) -> ImportMap {
     import_map
 }
 
-fn parse_function(t: &Type, name: &str, depth: u8) -> String {
+fn parse_function(t: &Type<ResolvedReference>, name: &str, depth: u8) -> String {
     match t {
         Type::Atomic(at) => {
             let (instance, _err) = atomic_py_instance(at);
@@ -304,9 +340,30 @@ fn parse_function(t: &Type, name: &str, depth: u8) -> String {
             }
         },
         Type::Reference(_) => todo!(),
-        Type::Anonymous(_) => todo!(),
+        // Type::Anonymous(_) => todo!(),
     }
 }
+
+fn gen_enum_variant(mut gen_ctx: &mut GenCtx, variant: &ast::EnumVariant<ResolvedReference>) -> PyToken {
+    let mut tokens = Vec::new();
+    let dataclass = PyToken::Import(
+        PyImport::Specific("dataclasses".to_string(), "dataclass".to_string()),
+        None,
+    );
+    tokens.push("@".into());
+    tokens.push(dataclass);
+    tokens.push(PyToken::NewLine);
+    tokens.extend(pyclass(&variant.name, vec![], vec![]));
+    PyToken::Block(tokens)
+}
+
+// /// We may need to summon a new name from the given constructor
+// fn gen_variant_name(variant: &ast::EnumVariant) -> String {
+//     match &variant.value {
+//         VariantValue::StructCtor(_) => format!("{}Struct", variant.name),
+//         _ => variant.name.to_string(),
+//     }
+// }
 
 struct If {
     condition: PyToken,
@@ -448,8 +505,9 @@ impl From<&str> for PyToken {
     }
 }
 
-impl From<Type> for PyToken {
-    fn from(t: Type) -> Self {
+// impl<T: std::fmt::Debug + std::fmt::Display> From<Type<T>> for PyToken {
+impl From<Type<String>> for PyToken {
+    fn from(t: Type<String>) -> Self {
         match t {
             Type::Atomic(at) => at.into(),
             Type::Reference(r) => {
@@ -459,7 +517,7 @@ impl From<Type> for PyToken {
                     format!("\"{}\"", r.name).into()
                 }
             }
-            Type::Anonymous(_) => todo!(),
+            // Type::Anonymous(_) => todo!(),
             Type::Builtin(b) => match b {
                 Builtin::List(lt) => typed_list((*lt).into()),
                 Builtin::Optional(ot) => typed_optional((*ot).into()),
@@ -602,7 +660,7 @@ fn try_import(sym: &str, primary_source: &str, fallback: &str) -> PyImport {
 /// foo: int = 3
 fn typed_attr(name: &str, typ: Vec<PyToken>, default_val: Option<PyToken>) -> PyToken {
     let mut tokens = Vec::new();
-    tokens.push(name.to_snake_case().into());
+    tokens.push(name.into());
     if !typ.is_empty() {
         tokens.push(": ".into());
         tokens.extend(typ);
@@ -616,27 +674,27 @@ fn typed_attr(name: &str, typ: Vec<PyToken>, default_val: Option<PyToken>) -> Py
 
 /// Turn an ast::Field into a field declaration like:
 /// foo: int
-fn typed_field(f: &Field) -> PyToken {
+fn typed_field(f: &Field<ResolvedReference>) -> PyToken {
     typed_attr(&f.name, vec![f.typ.clone().into()], None)
 }
 
 /// return the same type, with all Optional
-fn unpack_optional(typ: Type) -> Type {
+fn unpack_optional(typ: Type<ResolvedReference>) -> Type<ResolvedReference> {
     match typ {
         Type::Builtin(Builtin::Optional(t)) => *t,
         x => x,
     }
 }
 
-// fn typed_union(typs: Vec<PyToken>) -> PyToken {
-//     let union = type_import("Union");
-//     let mut tokens = vec![union];
-//     tokens.push("[".into());
-//     tokens.extend(intersperce(", ".into(), typs));
-//     tokens.push("]".into());
-//
-//     PyToken::Block(tokens)
-// }
+fn typed_union(typs: Vec<PyToken>) -> PyToken {
+    let union = type_import("Union");
+    let mut tokens = vec![union];
+    tokens.push("[".into());
+    tokens.extend(intersperce(", ".into(), typs));
+    tokens.push("]".into());
+
+    PyToken::Block(tokens)
+}
 
 fn typed_list(typ: PyToken) -> PyToken {
     let list = type_import("List");

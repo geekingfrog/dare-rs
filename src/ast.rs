@@ -2,22 +2,22 @@ use std::fmt::Debug;
 use std::vec::Vec;
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum TopDeclaration {
-    Struct(Struct),
-    Enum(Enum),
+pub enum TopDeclaration<Reference> {
+    Struct(Struct<Reference>),
+    Enum(Enum<Reference>),
     // TODO: type alias
-    Alias(Alias),
+    Alias(Alias<Reference>),
 }
 
 /// struct Foo {…}
 /// struct Bar<A, B> {…}
 #[derive(Debug, PartialEq, Eq)]
-pub struct Struct {
+pub struct Struct<Reference> {
     pub location: SrcSpan,
     pub name: String,
     // only generic types are allowed in definition
     pub type_parameters: Vec<String>,
-    pub fields: Vec<Field>,
+    pub fields: Vec<Field<Reference>>,
 }
 
 /// field1: Int,
@@ -26,10 +26,10 @@ pub struct Struct {
 /// field4: Bar<Int>,
 /// field5: Bar<Map<String, V>>
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Field {
+pub struct Field<Reference> {
     pub location: SrcSpan,
     pub name: String,
-    pub typ: Type,
+    pub typ: Type<Reference>,
 }
 
 /// enum Foo = {A, B, C, D}
@@ -41,49 +41,49 @@ pub struct Field {
 /// ["Detailed", "val_A", val_B""]
 ///  or {"type": "Detailed", "value": ["val_A", "val_B"]}
 #[derive(Debug, PartialEq, Eq)]
-pub struct Enum {
+pub struct Enum<Reference> {
     pub location: SrcSpan,
     pub name: String,
     // only generic types are allowed in definition
     pub type_parameters: Vec<String>,
-    pub variants: Vec<EnumVariant>,
+    pub variants: Vec<EnumVariant<Reference>>,
 }
 
 /// type MaybeInt = Maybe<Int>
 #[derive(Debug, PartialEq, Eq)]
-pub struct Alias {
+pub struct Alias<Reference> {
     pub location: SrcSpan,
     pub name: String,
-    pub alias: RefType,
+    pub alias: RefType<Reference>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct EnumVariant {
+pub struct EnumVariant<Reference> {
     pub location: SrcSpan,
     pub name: String,
-    pub value: VariantValue,
+    pub value: VariantValue<Reference>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum VariantValue {
+pub enum VariantValue<Reference> {
     OnlyCtor,
-    PositionalCtor(Vec<Type>),
-    StructCtor(Vec<Field>),
+    PositionalCtor(Vec<Type<Reference>>),
+    StructCtor(Vec<Field<Reference>>),
 }
 
 /// A type can be atomic (String, Bool, Int…), a reference to another type
 /// (Foo, Bar<T>, Map<String, Int>), or a generic type like `T` or `errorType`.
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Type {
+pub enum Type<Reference> {
     /// One of the basic atomic type
     Atomic(AtomicType),
     /// Generic type or reference to existing type
     /// like Barf<Foo, T, Bar<Int>>
-    Reference(RefType),
-    /// Anonymous structure like List<{foo: Int}>
-    Anonymous(Vec<Field>),
+    Reference(RefType<Reference>),
+    // /// Anonymous structure like List<{foo: Int}>
+    // Anonymous(Vec<Field>),
     /// Builtin type like List, Map and Optional
-    Builtin(Builtin),
+    Builtin(Builtin<Reference>),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -106,17 +106,28 @@ pub enum AtomicType {
 
 /// A reference to another type. Like Foo, or Bar<T>
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct RefType {
+pub struct RefType<Reference> {
     pub location: SrcSpan,
-    pub name: String,
-    pub type_parameters: Vec<Type>,
+    pub name: Reference,
+    pub type_parameters: Vec<Type<Reference>>,
 }
 
+// TODO
+pub type ResolvedReference = String;
+
+// /// Used after AST validation, where the generic type is resolved
+// /// to a reference to primitive type, or another declared type
+// pub struct ResolvedRef {
+//     pub location: ScrSpan,
+//     pub target: ?,
+//     pub type_parameters: Vec<Type>,
+// }
+
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Builtin {
-    List(Box<Type>),
-    Optional(Box<Type>),
-    Map(Box<Type>, Box<Type>),
+pub enum Builtin<Reference> {
+    List(Box<Type<Reference>>),
+    Optional(Box<Type<Reference>>),
+    Map(Box<Type<Reference>>, Box<Type<Reference>>),
 }
 
 #[derive(Debug, PartialEq, Eq, Default, Clone)]

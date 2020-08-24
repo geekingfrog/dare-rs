@@ -17,16 +17,16 @@ use crate::ast::{
 
 grammar;
 
-pub TopDeclarations: Vec<TopDeclaration> = {
+pub TopDeclarations: Vec<TopDeclaration<String>> = {
   TopDeclaration* => <>,
 }
 
-pub TopDeclaration: TopDeclaration = {
+pub TopDeclaration: TopDeclaration<String> = {
   Struct => TopDeclaration::Struct(<>),
   Enum => TopDeclaration::Enum(<>),
 }
 
-pub Struct: Struct = {
+pub Struct: Struct<String> = {
   <s:@L> "struct" <name:Word> <params: TopLevelParams> "{" <fields:Comma<Field>> "}" <e:@L> => Struct {
     location: location(s, e),
     name: name.to_string(),
@@ -35,7 +35,7 @@ pub Struct: Struct = {
   }
 }
 
-pub Enum: Enum = {
+pub Enum: Enum<String> = {
   <s:@L> "enum" <name:Word> <params: TopLevelParams> "{" <variants:Comma<EnumVariant>> "}" <e:@L> => Enum {
     location: location(s, e),
     name: name.to_string(),
@@ -44,7 +44,7 @@ pub Enum: Enum = {
   }
 }
 
-pub Alias: Alias = {
+pub Alias: Alias<String> = {
   <s:@L> "type" <name:Word> "=" <alias:RefType> <e:@L> => Alias {
     location: location(s, e),
     name: name.to_string(),
@@ -52,7 +52,7 @@ pub Alias: Alias = {
   }
 }
 
-pub RefType: RefType = {
+pub RefType: RefType<String> = {
   <s:@L> <n:Word> <params:("<" <Comma<Type>> ">")?> <e:@L> => RefType {
     location: location(s, e),
     name: n.to_string(),
@@ -60,7 +60,7 @@ pub RefType: RefType = {
   },
 }
 
-pub Field: Field = {
+pub Field: Field<String> = {
   <s:@L> <name:word> ":" <typ: Type> <e:@L> => Field {
     location: location(s, e),
     name: name.to_string(),
@@ -68,7 +68,7 @@ pub Field: Field = {
   },
 }
 
-pub Type: Type = {
+pub Type: Type<String> = {
   <atom:AtomicType> => Type::Atomic(atom),
   <s:@L> <n:Word> <types:("<" <Comma<Type>> ">")?> <e:@L> => Type::Reference(RefType {
     location: location(s, e),
@@ -76,7 +76,8 @@ pub Type: Type = {
     type_parameters: types.unwrap_or(vec![]),
   }),
 
-  "{" <fields:Comma<Field>> "}" => Type::Anonymous(fields),
+  // ditch the anon structs for use in list List<{...}> (at least for now)
+  // "{" <fields:Comma<Field>> "}" => Type::Anonymous(fields),
 
   "List<" <typ:Type> ">" => Type::Builtin(Builtin::List(Box::new(typ))),
   "[" <typ:Type> "]" => Type::Builtin(Builtin::List(Box::new(typ))),
@@ -100,7 +101,7 @@ TopLevelParams: Vec<String> = {
   }
 }
 
-EnumVariant: EnumVariant = {
+EnumVariant: EnumVariant<String> = {
   <s:@L> <name:Word> <value:VariantValue> <e:@L> => EnumVariant {
     location: location(s, e),
     name: name.to_string(),
@@ -108,7 +109,7 @@ EnumVariant: EnumVariant = {
   }
 }
 
-VariantValue: VariantValue = {
+VariantValue: VariantValue<String> = {
   "{" <fields:Comma<Field>> "}" => VariantValue::StructCtor(
     fields
   ),
