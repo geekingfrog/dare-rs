@@ -102,9 +102,10 @@ TopLevelParams: Vec<String> = {
 }
 
 EnumVariant: EnumVariant<String> = {
-  <s:@L> <name:Word> <value:VariantValue> <e:@L> => EnumVariant {
+  <s:@L> <name:Word> <value:VariantValue> <alias:("as" <quoted_word>)?> <e:@L> => EnumVariant {
     location: location(s, e),
     name: name.to_string(),
+    alias: alias.map(|x| x.to_string()),
     value,
   }
 }
@@ -149,7 +150,10 @@ Comma<T>: Vec<T> = {
     }
 };
 
+quoted_word: String = <w:quoted_word_r> => w[1..w.len()-1].to_string();
+
 match {
+  "as",
   "struct",
   "enum",
   "type",
@@ -170,6 +174,8 @@ match {
   "Float",
   "Bool",
   "Bytes",
+} else {
+  r#""[^"]*""# => quoted_word_r,
 } else {
   r"[A-Z]\w*" => Word,
 } else {

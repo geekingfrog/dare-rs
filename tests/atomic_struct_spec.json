@@ -4,6 +4,11 @@
   "tests": {
     "Customer": [
       {
+        "description": "null data is invalid",
+        "valid": false,
+        "data": null
+      },
+      {
         "description": "valid struct",
         "valid": true,
         "data": {

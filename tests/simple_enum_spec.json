@@ -1,0 +1,33 @@
+{
+  "description": "simple enum (sum types with no associated values)",
+  "schema": "enum.dare",
+  "tests": {
+    "SimpleEnum": [
+      {
+        "description": "null data is invalid",
+        "valid": false,
+        "data": null
+      },
+      {
+        "description": "integers are invalid",
+        "valid": false,
+        "data": 1
+      },
+      {
+        "description": "first constructor with alias",
+        "valid": true,
+        "data": "one"
+      },
+      {
+        "description": "second constructor",
+        "valid": true,
+        "data": "SimpleTwo"
+      },
+      {
+        "description": "unknown string",
+        "valid": false,
+        "data": "DoesntExist"
+      }
+    ]
+  }
+}

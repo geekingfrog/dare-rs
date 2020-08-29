@@ -1,0 +1,4 @@
+enum SimpleEnum {
+  Simple1 as "one",
+  SimpleTwo,
+}

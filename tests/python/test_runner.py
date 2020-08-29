@@ -6,7 +6,7 @@
 import json
 import pytest
 from operator import itemgetter
-from . import atomic_struct
+from . import atomic_struct, simple_enum
 
 
 def gather_tests(spec_name):
@@ -39,3 +39,16 @@ def test_atomic_struct_student(test_spec):
     else:
         with pytest.raises(atomic_struct.ValidationError):
             atomic_struct.Student.from_json(test_spec["data"])
+
+
+@pytest.mark.parametrize(
+    "test_spec",
+    gather_tests("../simple_enum_spec.json")["SimpleEnum"],
+    ids=itemgetter("description"),
+)
+def test_simple_enum(test_spec):
+    if test_spec["valid"]:
+        simple_enum.SimpleEnum.from_json(test_spec["data"])
+    else:
+        with pytest.raises(simple_enum.ValidationError):
+            simple_enum.SimpleEnum.from_json(test_spec["data"])

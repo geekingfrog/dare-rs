@@ -49,6 +49,21 @@ pub struct Enum<Reference> {
     pub variants: Vec<EnumVariant<Reference>>,
 }
 
+impl<T> Enum<T> {
+    /// returns true if the sum type is actually a simple enum,
+    /// that is, only has variants with only constructor and no
+    /// data attached to them
+    pub fn is_simple_enum(&self) -> bool {
+        for v in self.variants.iter() {
+            match v.value {
+                VariantValue::OnlyCtor => continue,
+                _ => return false
+            }
+        }
+        true
+    }
+}
+
 /// type MaybeInt = Maybe<Int>
 #[derive(Debug, PartialEq, Eq)]
 pub struct Alias<Reference> {
@@ -61,6 +76,7 @@ pub struct Alias<Reference> {
 pub struct EnumVariant<Reference> {
     pub location: SrcSpan,
     pub name: String,
+    pub alias: Option<String>,
     pub value: VariantValue<Reference>,
 }
 
@@ -116,7 +132,7 @@ pub struct RefType<Reference> {
 pub type ResolvedReference = String;
 
 // /// Used after AST validation, where the generic type is resolved
-// /// to a reference to primitive type, or another declared type
+// /// to a primitive type, or another declared type
 // pub struct ResolvedRef {
 //     pub location: ScrSpan,
 //     pub target: ?,

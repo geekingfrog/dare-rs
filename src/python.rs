@@ -1,6 +1,6 @@
 use crate::ast;
 use crate::ast::{
-    Alias, AtomicType, Builtin, Enum, Field, Struct, TopDeclaration, Type, VariantValue, ResolvedReference
+    Alias, AtomicType, Builtin, Enum, Field, ResolvedReference, Struct, TopDeclaration, Type,
 };
 use inflections::Inflect;
 use std::collections::{BTreeMap, BTreeSet};
@@ -22,8 +22,8 @@ pub fn gen_python(decls: &[ast::TopDeclaration<ResolvedReference>]) -> Vec<PyTok
     tokens.push(PyToken::NewLine);
     tokens.extend(intersperce(PyToken::NewLine, code_tokens));
 
-    // tokens.push(PyToken::NewLine);
-    // tokens.push(SRC_PYTHON_PRELUDE.into());
+    tokens.push(PyToken::NewLine);
+    tokens.push(SRC_PYTHON_PRELUDE.into());
 
     tokens
 }
@@ -49,7 +49,10 @@ impl GenCtx {
     }
 }
 
-fn gen_python_top_decl(mut gen_ctx: &mut GenCtx, decl: &ast::TopDeclaration<ResolvedReference>) -> Vec<PyToken> {
+fn gen_python_top_decl(
+    mut gen_ctx: &mut GenCtx,
+    decl: &ast::TopDeclaration<ResolvedReference>,
+) -> Vec<PyToken> {
     let mut tokens = Vec::new();
 
     let decl_tokens = match decl {
@@ -131,12 +134,12 @@ fn gen_py_struct(s: &Struct<ResolvedReference>) -> Vec<PyToken> {
     body.push(PyToken::NewLine);
 
     let any = PyToken::Import(
-        PyImport::Specific("typing".to_string(), "Any".to_string()),
+        PyImport::Specific("typing".to_owned(), "Any".to_owned()),
         None,
     );
     let abc_mapping = PyToken::Import(
-        PyImport::Full("collections".to_string()),
-        Some("abc.Mapping".to_string()),
+        PyImport::Full("collections".to_owned()),
+        Some("abc.Mapping".to_owned()),
     );
     let mut from_json_body = vec![];
 
@@ -205,7 +208,7 @@ fn gen_py_struct(s: &Struct<ResolvedReference>) -> Vec<PyToken> {
 
     tokens.push(PyToken::NewLine);
     let dataclass = PyToken::Import(
-        PyImport::Specific("dataclasses".to_string(), "dataclass".to_string()),
+        PyImport::Specific("dataclasses".to_owned(), "dataclass".to_owned()),
         None,
     );
     tokens.push("@".into());
@@ -224,18 +227,22 @@ fn gen_py_enum(mut gen_ctx: &mut GenCtx, e: &Enum<ResolvedReference>) -> Vec<PyT
     if !e.type_parameters.is_empty() {
         panic!("Enum with type parameters not supported yet");
     }
-    // println!("{:#?}", e);
     let mut tokens = Vec::new();
-    for variant in &e.variants {
-        tokens.push(gen_enum_variant(&mut gen_ctx, &variant));
+
+    if e.is_simple_enum() {
+        tokens.push(gen_simple_enum(&e));
+    } else {
+        for variant in &e.variants {
+            tokens.push(gen_enum_variant(&mut gen_ctx, &variant));
+            tokens.push(PyToken::NewLine);
+        }
+
+        tokens.push(format!("{}TypeDef = ", e.name).into());
+        tokens.push(typed_union(
+            e.variants.iter().map(|v| v.name.clone().into()).collect(),
+        ));
         tokens.push(PyToken::NewLine);
     }
-
-    tokens.push(format!("{}TypeDef = ", e.name).into());
-    tokens.push(typed_union(
-        e.variants.iter().map(|v| v.name.clone().into()).collect(),
-    ));
-    tokens.push(PyToken::NewLine);
 
     tokens
 }
@@ -344,10 +351,90 @@ fn parse_function(t: &Type<ResolvedReference>, name: &str, depth: u8) -> String 
     }
 }
 
-fn gen_enum_variant(mut gen_ctx: &mut GenCtx, variant: &ast::EnumVariant<ResolvedReference>) -> PyToken {
+fn gen_simple_enum(e: &Enum<ResolvedReference>) -> PyToken {
+    // class BaseTest(Enum):
+    //     A = "A"
+    //     B = "B"
+    //     C = "C"
+    //     D = "D"
+    let enum_class = PyToken::Import(
+        PyImport::Specific("enum".to_owned(), "Enum".to_owned()),
+        None,
+    );
+
+    let attributes = intersperce(
+        PyToken::NewLine,
+        e.variants
+            .iter()
+            .map(|variant| {
+                let val = variant.alias.as_ref().unwrap_or(&variant.name);
+                format!("{} = \"{}\"", variant.name.to_pascal_case(), val).into()
+            })
+            .collect(),
+    );
+
+    let mut body = Vec::new();
+    body.extend(attributes);
+    body.push(PyToken::NewLine);
+    body.push(PyToken::NewLine);
+
+    let cast = PyImport::Specific("typing".to_owned(), "cast".to_owned());
+    body.extend(py_fn(
+        "to_json",
+        vec!["self".into()],
+        vec![
+            "return ".into(),
+            PyToken::Import(cast, None),
+            format!("(str, self.value)").into(),
+        ],
+        Some("str".into()),
+    ));
+    body.push(PyToken::NewLine);
+    body.push(PyToken::NewLine);
+
+    let any = PyToken::Import(
+        PyImport::Specific("typing".to_owned(), "Any".to_owned()),
+        None,
+    );
+
+    let mut from_json_body = vec![];
+    for variant in &e.variants {
+        let val = variant.alias.as_ref().unwrap_or(&variant.name);
+        from_json_body.push(
+            If::new(
+                format!(r#"raw == "{}""#, val).into(),
+                format!("return cls.{}", variant.name.to_pascal_case()).into(),
+            )
+            .into(),
+        );
+    }
+    from_json_body.push(
+        format!(
+            r#"raise ValidationError("Invalid {} value: {{}}".format(raw))"#,
+            e.name.to_pascal_case()
+        )
+        .into(),
+    );
+
+    body.push("@classmethod".into());
+    body.push(PyToken::NewLine);
+    body.extend(py_fn(
+        "from_json",
+        vec!["cls".into(), typed_attr("raw", vec![any], None)],
+        from_json_body,
+        Some(format!(r#""{}""#, e.name).into()),
+    ));
+
+    PyToken::Block(pyclass(&e.name.to_pascal_case(), vec![enum_class], body))
+}
+
+fn gen_enum_variant(
+    mut gen_ctx: &mut GenCtx,
+    variant: &ast::EnumVariant<ResolvedReference>,
+) -> PyToken {
     let mut tokens = Vec::new();
     let dataclass = PyToken::Import(
-        PyImport::Specific("dataclasses".to_string(), "dataclass".to_string()),
+        PyImport::Specific("dataclasses".to_owned(), "dataclass".to_owned()),
         None,
     );
     tokens.push("@".into());
@@ -361,7 +448,7 @@ fn gen_enum_variant(mut gen_ctx: &mut GenCtx, variant: &ast::EnumVariant<Resolve
 // fn gen_variant_name(variant: &ast::EnumVariant) -> String {
 //     match &variant.value {
 //         VariantValue::StructCtor(_) => format!("{}Struct", variant.name),
-//         _ => variant.name.to_string(),
+//         _ => variant.name.to_owned(),
 //     }
 // }
 
@@ -417,16 +504,16 @@ fn render(conf: &PyConfig, mut ctx: &mut FormatContext, tokens: &[PyToken]) -> S
                 ctx.should_indent = false;
             }
             PyToken::Space => {
-                buf.push(" ".to_string());
+                buf.push(" ".to_owned());
                 ctx.should_indent = false;
             }
             PyToken::NewLine => {
-                buf.push("\n".to_string());
+                buf.push("\n".to_owned());
                 ctx.should_indent = true;
             }
             PyToken::Indent(i) => {
                 let il = ctx.indent_level as i8;
-                buf.push("\n".to_string());
+                buf.push("\n".to_owned());
                 ctx.indent_level = (il + i) as usize;
                 ctx.should_indent = true;
             }
@@ -443,14 +530,14 @@ pub enum PyImport {
     /// import json
     Full(String),
 
-    /// Specific("typing".to_string(), "Any".to_string())
+    /// Specific("typing".to_owned(), "Any".to_owned())
     /// from typing import Any
     Specific(String, String),
 
     /// when an import could fail, but there's a fallback
     /// clearly not meant for general python import-fu, but
     /// enough for this codegen usecase
-    /// Try("typing".to_string(), "typing_extensions".to_string(), "TypedDict")
+    /// Try("typing".to_owned(), "typing_extensions".to_owned(), "TypedDict")
     /// try:
     ///     from typing import TypedDict
     /// except ImportError:
@@ -462,9 +549,9 @@ impl PyImport {
     /// extract the imported String
     fn sym(&self) -> String {
         match self {
-            PyImport::Full(s) => s.to_string(),
-            PyImport::Specific(_, s) => s.to_string(),
-            PyImport::Try(_, _, s) => s.to_string(),
+            PyImport::Full(s) => s.to_owned(),
+            PyImport::Specific(_, s) => s.to_owned(),
+            PyImport::Try(_, _, s) => s.to_owned(),
         }
     }
 }
@@ -477,7 +564,7 @@ pub enum PyToken {
     /// When a symbol is coming from an import
     /// `typing.Union`
     /// would give:
-    /// Import(PyImport::Full("typing"), Some("Union".to_string()))
+    /// Import(PyImport::Full("typing"), Some("Union".to_owned()))
     /// `from typing import Union`
     /// would give
     /// Import(PyImport::Specific("typing", "Union"), None)
@@ -501,7 +588,7 @@ impl From<String> for PyToken {
 
 impl From<&str> for PyToken {
     fn from(s: &str) -> Self {
-        PyToken::Raw(s.to_string())
+        PyToken::Raw(s.to_owned())
     }
 }
 
@@ -650,9 +737,9 @@ fn py_fn(
 
 fn try_import(sym: &str, primary_source: &str, fallback: &str) -> PyImport {
     PyImport::Try(
-        primary_source.to_string(),
-        fallback.to_string(),
-        sym.to_string(),
+        primary_source.to_owned(),
+        fallback.to_owned(),
+        sym.to_owned(),
     )
 }
 
@@ -726,7 +813,7 @@ fn typed_optional(typ: PyToken) -> PyToken {
 }
 
 fn type_import(typ: &str) -> PyToken {
-    let typ = PyImport::Specific("typing".to_string(), typ.to_string());
+    let typ = PyImport::Specific("typing".to_owned(), typ.to_owned());
     PyToken::Import(typ, None)
 }
 

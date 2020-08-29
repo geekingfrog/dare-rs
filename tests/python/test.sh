@@ -3,6 +3,7 @@
 set -euo pipefail
 
 cargo run -- --schema ../atomic_struct.dare --target-dir ./
+cargo run -- --schema ../simple_enum.dare --target-dir ./
 
 if [ ! -f ./venv/bin/pytest ]; then
   python -m venv venv
