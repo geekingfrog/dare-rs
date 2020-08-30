@@ -130,35 +130,3 @@ def parse_map(
     if errors:
         raise ValidationError(message=errors)
     return result
-
-
-T1 = TypeVar("T1")
-T2 = TypeVar("T2")
-T3 = TypeVar("T3")
-T4 = TypeVar("T4")
-T5 = TypeVar("T5")
-
-
-def parse_tuple_2(
-    parse1: Callable[[Any], T1], parse2: Callable[[Any], T2], v: Any
-) -> Tuple[T1, T2]:
-    if not isinstance(v, list):
-        raise ValidationError(message="Not a list")
-    if len(v) != 2:
-        raise ValidationError(message="Expected 2 values but got {}".format(len(v)))
-
-    errors = {}
-    try:
-        v1 = parse1(v[0])
-    except ValidationError as e:
-        errors["0"] = e.messages
-
-    try:
-        v2 = parse2(v[1])
-    except ValidationError as e:
-        errors["1"] = e.messages
-
-    if errors:
-        raise ValidationError(message=errors)
-
-    return (v1, v2)
