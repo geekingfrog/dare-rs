@@ -11,7 +11,7 @@ pub const SRC_PYTHON_PRELUDE: &'static str = include_str!("prelude.py");
 
 #[allow(dead_code)]
 pub fn gen_python(decls: &[ast::TopDeclaration<ResolvedReference>]) -> Vec<PyToken> {
-    let mut gen_ctx = GenCtx::new();
+    let mut gen_ctx = GenCtx::new(decls);
     let code_tokens: Vec<PyToken> = decls
         .iter()
         .map(|decl| PyToken::Block(gen_python_top_decl(&mut gen_ctx, decl)))
@@ -46,17 +46,19 @@ pub fn render_python(tokens: &[PyToken]) -> String {
 
 /// A struct used to gather various requirements while
 /// generating the code.
-struct GenCtx {
+struct GenCtx<'decls> {
     /// The code to parse tuple is very tedious to write manually and thus
     /// instead of putting that in the prelude, track which tuple arities
     /// are required. The parsing code will be generated on the fly
     tuple_arities: BTreeSet<u8>,
+    top_declarations: &'decls [ast::TopDeclaration<ResolvedReference>],
 }
 
-impl GenCtx {
-    fn new() -> Self {
+impl<'decls> GenCtx<'decls> {
+    fn new(decls: &'decls [ast::TopDeclaration<ResolvedReference>]) -> Self {
         GenCtx {
             tuple_arities: BTreeSet::new(),
+            top_declarations: decls,
         }
     }
 }
@@ -68,7 +70,7 @@ fn gen_python_top_decl(
     let mut tokens = Vec::new();
 
     let decl_tokens = match decl {
-        TopDeclaration::Struct(s) => gen_py_struct(s),
+        TopDeclaration::Struct(s) => gen_py_struct(&gen_ctx, s),
         TopDeclaration::Enum(e) => gen_py_enum(&mut gen_ctx, e),
         TopDeclaration::Alias(a) => gen_py_alias(a),
     };
@@ -78,17 +80,19 @@ fn gen_python_top_decl(
     tokens
 }
 
-fn gen_py_struct(s: &Struct<ResolvedReference>) -> Vec<PyToken> {
+fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct<ResolvedReference>) -> Vec<PyToken> {
     let mut tokens = Vec::new();
     let td = PyToken::Import(try_import("TypedDict", "typing", "typing_extensions"), None);
 
-    let dict_attributes = intersperce(
-        PyToken::NewLine,
-        s.fields.iter().map(|f| typed_field(f)).collect(),
-    );
-
     let struct_td_name = format!("{}TypedDict", s.name);
-    let struct_td = pyclass(&struct_td_name, vec![td], dict_attributes.clone());
+    let struct_td_attrs = intersperce(
+        PyToken::NewLine,
+        s.fields
+            .iter()
+            .map(|f| typed_attr(&f.name, vec![f.typ.get_json_type(&gen_ctx).into()], None))
+            .collect(),
+    );
+    let struct_td = pyclass(&struct_td_name, vec![td], struct_td_attrs);
     tokens.extend(struct_td);
 
     tokens.push(PyToken::NewLine);
@@ -98,7 +102,13 @@ fn gen_py_struct(s: &Struct<ResolvedReference>) -> Vec<PyToken> {
         PyToken::NewLine,
         s.fields
             .iter()
-            .map(|f| typed_attr(&f.name.to_snake_case(), vec![f.typ.clone().into()], None))
+            .map(|f| {
+                typed_attr(
+                    &f.name.to_snake_case(),
+                    vec![f.typ.to_py_token(&gen_ctx)],
+                    None,
+                )
+            })
             .collect(),
     ));
     body.push(PyToken::NewLine);
@@ -108,7 +118,10 @@ fn gen_py_struct(s: &Struct<ResolvedReference>) -> Vec<PyToken> {
     init_args.extend(s.fields.iter().map(|f| {
         typed_attr(
             &f.name.to_snake_case(),
-            vec![Type::Builtin(Builtin::Optional(Box::new(unpack_optional(f.typ.clone())))).into()],
+            vec![
+                Type::Builtin(Builtin::Optional(Box::new(unpack_optional(f.typ.clone()))))
+                    .to_py_token(&gen_ctx),
+            ],
             None,
         )
     }));
@@ -123,7 +136,7 @@ fn gen_py_struct(s: &Struct<ResolvedReference>) -> Vec<PyToken> {
 
         init_body.push("try:".into());
         init_body.push(indent(1));
-        let parse_fn = get_parse_function(&field.typ, &name, 0);
+        let parse_fn = get_parse_function(&gen_ctx, &field.typ, &name, 0);
         init_body.push(format!("self.{} = {}", name, parse_fn).into());
         init_body.push(indent(-1));
         init_body.push("except ValidationError as e:".into());
@@ -206,7 +219,16 @@ fn gen_py_struct(s: &Struct<ResolvedReference>) -> Vec<PyToken> {
                 PyToken::NewLine,
                 s.fields
                     .iter()
-                    .map(|f| format!(r#""{}": self.{},"#, f.name, f.name.to_snake_case()).into())
+                    .map(|f| {
+                        let name = f.name.to_snake_case();
+                        format!(
+                            r#""{}": self.{},"#,
+                            f.name,
+                            get_dump_function(&gen_ctx, &f.typ, &name.to_snake_case(), 0)
+                                .unwrap_or(name)
+                        )
+                        .into()
+                    })
                     .collect(),
             )),
             indent(-1),
@@ -313,7 +335,12 @@ fn gather_imports(tokens: &[PyToken]) -> ImportMap {
 
 /// Given a `Type`, return a string representing the function to parse json into
 /// that type
-fn get_parse_function(t: &Type<ResolvedReference>, name: &str, depth: u8) -> String {
+fn get_parse_function(
+    gen_ctx: &GenCtx,
+    t: &Type<ResolvedReference>,
+    name: &str,
+    depth: u8,
+) -> String {
     match t {
         Type::Atomic(at) => {
             let (instance, _err) = atomic_py_instance(at);
@@ -325,7 +352,7 @@ fn get_parse_function(t: &Type<ResolvedReference>, name: &str, depth: u8) -> Str
         }
         Type::Builtin(builtin_type) => match builtin_type {
             Builtin::Optional(opt_type) => {
-                let nested = get_parse_function(opt_type, name, depth + 1);
+                let nested = get_parse_function(&gen_ctx, opt_type, name, depth + 1);
                 if depth == 0 {
                     format!("parse_optional({}, {})", nested, name)
                 } else {
@@ -333,7 +360,7 @@ fn get_parse_function(t: &Type<ResolvedReference>, name: &str, depth: u8) -> Str
                 }
             }
             Builtin::List(inner) => {
-                let nested = get_parse_function(inner, name, depth + 1);
+                let nested = get_parse_function(&gen_ctx, inner, name, depth + 1);
                 if depth == 0 {
                     format!("parse_list({}, {})", nested, name)
                 } else {
@@ -341,19 +368,30 @@ fn get_parse_function(t: &Type<ResolvedReference>, name: &str, depth: u8) -> Str
                 }
             }
             Builtin::Map(key_type, val_type) => {
-                let parse_key_fn = get_parse_function(key_type, "key_name?", depth + 1);
-                let parse_val_fn = get_parse_function(val_type, "val_name?", depth + 1);
+                let parse_key_fn = get_parse_function(&gen_ctx, key_type, "key_name?", depth + 1);
+                let parse_val_fn = get_parse_function(&gen_ctx, val_type, "val_name?", depth + 1);
                 format!("parse_map({}, {}, {})", parse_key_fn, parse_val_fn, name)
             }
         },
-        Type::Reference(_) => todo!("parse function for reference"),
-        // Type::Anonymous(_) => todo!(),
+        Type::Reference(r) => {
+            let referenced_decl = &gen_ctx.top_declarations[r.name];
+            if depth == 0 {
+                format!("{}.from_json({})", referenced_decl.get_name(), name)
+            } else {
+                format!("{}.from_json", referenced_decl.get_name(),)
+            }
+        }
     }
 }
 
 /// Dual of get_parse_function, returns a String representing the function to convert
 /// the given type into json representation
-fn get_dump_function(t: &Type<ResolvedReference>, name: &str, depth: u8) -> Option<String> {
+fn get_dump_function(
+    _gen_ctx: &GenCtx,
+    t: &Type<ResolvedReference>,
+    name: &str,
+    depth: u8,
+) -> Option<String> {
     match t {
         Type::Atomic(at) => match at {
             AtomicType::Bytes => {
@@ -367,7 +405,7 @@ fn get_dump_function(t: &Type<ResolvedReference>, name: &str, depth: u8) -> Opti
         },
         Type::Builtin(b) => match b {
             Builtin::List(t) => {
-                match get_dump_function(t, name, depth + 1) {
+                match get_dump_function(&_gen_ctx, t, name, depth + 1) {
                     // the inner type doesn't need any conversion, so the list
                     // itself also doesn't need conversion
                     None => None,
@@ -381,7 +419,7 @@ fn get_dump_function(t: &Type<ResolvedReference>, name: &str, depth: u8) -> Opti
                 }
             }
             Builtin::Optional(t) => {
-                match get_dump_function(t, name, depth + 1) {
+                match get_dump_function(&_gen_ctx, t, name, depth + 1) {
                     // the inner type doesn't need any conversion, so the type
                     // itself also doesn't need conversion
                     None => None,
@@ -396,10 +434,16 @@ fn get_dump_function(t: &Type<ResolvedReference>, name: &str, depth: u8) -> Opti
             }
             Builtin::Map(_, _) => todo!(),
         },
-        // References shouldn't be too hard, simply call .to_json on them if
-        // it's not an atomic or builtin.
-        // The typing may be a bit more tricky when it comes to generics.
-        Type::Reference(_) => todo!(),
+        Type::Reference(r) => {
+            // let referenced_decl = &gen_ctx.top_declarations[r.name];
+            // TODO check if the referenced top declaration is an alias. In this case
+            // simply calling to_json on it will not work
+            if depth == 0 {
+                Some(format!("{}.to_json()", name))
+            } else {
+                Some("lambda x: x.to_json()".to_owned())
+            }
+        }
     }
 }
 
@@ -579,13 +623,20 @@ fn gen_enum_variant(
         VariantValue::PositionalCtor(refs) => {
             td_class_body.push(PyToken::NewLine);
             if refs.len() == 1 {
-                td_class_body.push(typed_attr("contents", vec![refs[0].clone().into()], None));
+                td_class_body.push(typed_attr(
+                    "contents",
+                    vec![refs[0].get_json_type(&gen_ctx).into()],
+                    // vec![refs[0].to_py_token(&gen_ctx)],
+                    None,
+                ));
             } else {
                 let mut typs = vec![type_import("Tuple")];
                 typs.push("[".into());
                 typs.extend(intersperce(
                     ", ".into(),
-                    refs.iter().map(|t| t.get_json_type().into()).collect(),
+                    refs.iter()
+                        .map(|t| t.get_json_type(&gen_ctx).into())
+                        .collect(),
                 ));
                 typs.push("]".into());
                 td_class_body.push(typed_attr("contents", typs, None));
@@ -620,7 +671,7 @@ fn gen_enum_variant(
             if refs.len() == 1 {
                 class_body.push(typed_attr(
                     "inner".into(),
-                    vec![refs[0].clone().into()],
+                    vec![refs[0].to_py_token(&gen_ctx)],
                     None,
                 ));
 
@@ -630,9 +681,11 @@ fn gen_enum_variant(
                 class_body.extend(py_fn(
                     "__init__".into(),
                     vec!["self".into(), typed_attr("inner", vec!["Any".into()], None)],
-                    vec![
-                        format!("self.inner = {}", get_parse_function(&refs[0], "inner", 0)).into(),
-                    ],
+                    vec![format!(
+                        "self.inner = {}",
+                        get_parse_function(&gen_ctx, &refs[0], "inner", 0)
+                    )
+                    .into()],
                     Some("None".into()),
                 ));
 
@@ -644,7 +697,8 @@ fn gen_enum_variant(
                     vec![format!(
                         r#"return {{"tag": "{}", "contents": {}}}"#,
                         variant.name.to_pascal_case(),
-                        get_dump_function(&refs[0], "self.inner", 0).unwrap_or("self.inner".to_owned())
+                        get_dump_function(&gen_ctx, &refs[0], "self.inner", 0)
+                            .unwrap_or("self.inner".to_owned())
                     )
                     .into()],
                     Some(td_name.into()),
@@ -660,15 +714,17 @@ fn gen_enum_variant(
                 class_body.push("[".into());
                 class_body.push(PyToken::Block(intersperce(
                     ", ".into(),
-                    refs.iter().map(|r| r.clone().into()).collect(),
+                    refs.iter().map(|r| r.to_py_token(&gen_ctx)).collect(),
                 )));
                 class_body.push("]".into());
 
                 class_body.push(PyToken::NewLine);
                 class_body.push(PyToken::NewLine);
 
-                let mut parse_fns: Vec<_> =
-                    refs.iter().map(|t| get_parse_function(t, "", 1)).collect();
+                let mut parse_fns: Vec<_> = refs
+                    .iter()
+                    .map(|t| get_parse_function(&gen_ctx, t, "", 1))
+                    .collect();
                 parse_fns.push("inner".to_owned());
 
                 class_body.extend(py_fn(
@@ -691,7 +747,7 @@ fn gen_enum_variant(
                         .enumerate()
                         .map(|(idx, r)| {
                             let val_name = format!("self.inner[{}]", idx);
-                            get_dump_function(r, &val_name, 0)
+                            get_dump_function(&gen_ctx, r, &val_name, 0)
                                 .unwrap_or(val_name)
                                 .into()
                         })
@@ -913,7 +969,7 @@ fn render(conf: &PyConfig, mut ctx: &mut FormatContext, tokens: &[PyToken]) -> S
 impl Type<ResolvedReference> {
     /// Returns a python type hint for the json representation of
     /// this type after serialization.
-    fn get_json_type(&self) -> String {
+    fn get_json_type(&self, gen_ctx: &GenCtx) -> String {
         match &self {
             Type::Atomic(t) => match t {
                 AtomicType::Str => "str",
@@ -934,11 +990,14 @@ impl Type<ResolvedReference> {
             }
             .to_owned(),
             Type::Builtin(b) => match b {
-                Builtin::List(inner) => format!("List[{}]", inner.get_json_type()),
-                Builtin::Optional(inner) => format!("Optional[{}]", inner.get_json_type()),
+                Builtin::List(inner) => format!("List[{}]", inner.get_json_type(&gen_ctx)),
+                Builtin::Optional(inner) => format!("Optional[{}]", inner.get_json_type(&gen_ctx)),
                 Builtin::Map(_k, _v) => todo!(),
             },
-            Type::Reference(_) => todo!(),
+            Type::Reference(r) => {
+                let referenced_decl = &gen_ctx.top_declarations[r.name];
+                format!("{}TypedDict", referenced_decl.get_name())
+            }
         }
     }
 }
@@ -1032,9 +1091,55 @@ impl From<Type<String>> for PyToken {
     }
 }
 
+// // TODO: remove that. Only done to silence the compiler while I'm fixing other stuff
+// impl From<Type<usize>> for PyToken {
+//     fn from(t: Type<usize>) -> Self {
+//         todo!("can't implement From, need to have a function which resolve reference")
+//     }
+// }
+
+impl Type<usize> {
+    fn to_py_token(&self, gen_ctx: &GenCtx) -> PyToken {
+        match &self {
+            Type::Atomic(at) => at.into(),
+            Type::Reference(r) => {
+                let referenced_decl = &gen_ctx.top_declarations[r.name];
+                referenced_decl.get_name().into()
+            }
+            Type::Builtin(b) => match b {
+                Builtin::List(t) => {
+                    PyToken::Block(vec!["List[".into(), (*t).to_py_token(&gen_ctx), "]".into()])
+                }
+                Builtin::Optional(t) => PyToken::Block(vec![
+                    "Optional[".into(),
+                    (*t).to_py_token(&gen_ctx),
+                    "]".into(),
+                ]),
+                Builtin::Map(k, v) => {
+                    let dict = type_import("Mapping");
+                    PyToken::Block(vec![
+                        dict,
+                        "[".into(),
+                        k.to_py_token(&gen_ctx),
+                        ", ".into(),
+                        v.to_py_token(&gen_ctx),
+                        "]".into(),
+                    ])
+                }
+            },
+        }
+    }
+}
+
 impl From<AtomicType> for PyToken {
     fn from(at: AtomicType) -> Self {
-        atomic_py_instance(&at).0.into()
+        (&at).into()
+    }
+}
+
+impl From<&AtomicType> for PyToken {
+    fn from(at: &AtomicType) -> Self {
+        atomic_py_instance(at).0.into()
     }
 }
 
@@ -1179,8 +1284,8 @@ fn typed_attr(name: &str, typ: Vec<PyToken>, default_val: Option<PyToken>) -> Py
 
 /// Turn an ast::Field into a field declaration like:
 /// foo: int
-fn typed_field(f: &Field<ResolvedReference>) -> PyToken {
-    typed_attr(&f.name, vec![f.typ.clone().into()], None)
+fn typed_field(gen_ctx: &GenCtx, f: &Field<ResolvedReference>) -> PyToken {
+    typed_attr(&f.name, vec![f.typ.to_py_token(&gen_ctx)], None)
 }
 
 /// return the same type, with all Optional

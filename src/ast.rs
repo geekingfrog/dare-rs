@@ -1,5 +1,6 @@
+use anyhow::Result;
 use std::fmt::Debug;
-use std::vec::Vec;
+use std::{collections::BTreeMap, vec::Vec};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum TopDeclaration<Reference> {
@@ -7,6 +8,16 @@ pub enum TopDeclaration<Reference> {
     Enum(Enum<Reference>),
     // TODO: type alias
     Alias(Alias<Reference>),
+}
+
+impl<T> TopDeclaration<T> {
+    pub(crate) fn get_name(&self) -> &str {
+        match self {
+            TopDeclaration::Struct(s) => &s.name,
+            TopDeclaration::Enum(e) => &e.name,
+            TopDeclaration::Alias(a) => &a.name,
+        }
+    }
 }
 
 /// struct Foo {…}
@@ -57,7 +68,7 @@ impl<T> Enum<T> {
         for v in self.variants.iter() {
             match v.value {
                 VariantValue::OnlyCtor => continue,
-                _ => return false
+                _ => return false,
             }
         }
         true
@@ -128,8 +139,9 @@ pub struct RefType<Reference> {
     pub type_parameters: Vec<Type<Reference>>,
 }
 
-// TODO
-pub type ResolvedReference = String;
+/// Index for the reference with regard to the list of TopDeclaration
+/// Cannot directly use a Box<TopDeclaration<Reference>> because of cyclic declaration
+pub type ResolvedReference = usize;
 
 // /// Used after AST validation, where the generic type is resolved
 // /// to a primitive type, or another declared type
@@ -146,7 +158,7 @@ pub enum Builtin<Reference> {
     Map(Box<Type<Reference>>, Box<Type<Reference>>),
 }
 
-#[derive(Debug, PartialEq, Eq, Default, Clone)]
+#[derive(Debug, PartialEq, Eq, Default, Clone, Copy)]
 pub struct SrcSpan {
     pub start: usize,
     pub end: usize,
@@ -156,24 +168,128 @@ pub fn location(start: usize, end: usize) -> SrcSpan {
     SrcSpan { start, end }
 }
 
-/*
- * struct Foo<A,B> {
- *   foo_a: A,
- *   foo_b: B,
- * };
- *
- * struct Big<A,B,C,D> {
- *   big1: Int,
- *   big2: Option<A>,
- *   big3: Foo<B,C>,
- *   big4: Foo<String, D>,
- *   big5: Foo<Foo<Bool, Int>, String>,
- *   big6: List<{nested1: Int, nested2: A}>
- *
- * }
- *
- * type Test = Big<Bool, Int, Int, String>
- *
- * don't allow type synonyms with type parameter
- * type Incomplete<T> = Big<Bool, T, T, T>
- */
+type Mappings = BTreeMap<String, usize>;
+
+pub(crate) fn validate_ast(
+    decls: Vec<TopDeclaration<String>>,
+) -> Result<Vec<TopDeclaration<ResolvedReference>>> {
+    let mappings: Mappings = decls
+        .iter()
+        .enumerate()
+        .map(|(idx, d)| (d.get_name().to_owned(), idx))
+        .collect();
+
+    // let mut f: Vec<TopDeclaration<ResolvedReference>> = vec![];
+    decls
+        .into_iter()
+        .map(|decl| match decl {
+            TopDeclaration::Struct(s) => {
+                validate_struct(&mappings, s).map(|x| TopDeclaration::Struct(x))
+            }
+            TopDeclaration::Enum(e) => validate_enum(&mappings, e).map(|x| TopDeclaration::Enum(x)),
+            TopDeclaration::Alias(_) => Err(anyhow!("boom")),
+        })
+        .collect()
+}
+
+fn validate_struct(mappings: &Mappings, s: Struct<String>) -> Result<Struct<usize>> {
+    let fields = s
+        .fields
+        .into_iter()
+        .map(|f| validate_field(&mappings, f))
+        .collect::<Result<Vec<_>>>();
+
+    Ok(Struct {
+        location: s.location,
+        name: s.name.clone(),
+        type_parameters: s.type_parameters.clone(),
+        fields: fields?,
+    })
+}
+
+fn validate_field(mappings: &Mappings, f: Field<String>) -> Result<Field<usize>> {
+    Ok(Field {
+        location: f.location,
+        name: f.name,
+        typ: validate_type(&mappings, f.typ)?,
+    })
+}
+
+fn validate_enum(mappings: &Mappings, e: Enum<String>) -> Result<Enum<usize>> {
+    let variants = e
+        .variants
+        .into_iter()
+        .map(|v| validate_variant(&mappings, v))
+        .collect::<Result<Vec<_>>>();
+    Ok(Enum {
+        location: e.location,
+        name: e.name,
+        type_parameters: e.type_parameters,
+        variants: variants?,
+    })
+}
+
+fn validate_variant(mappings: &Mappings, ev: EnumVariant<String>) -> Result<EnumVariant<usize>> {
+    Ok(EnumVariant {
+        location: ev.location,
+        name: ev.name,
+        alias: ev.alias,
+        value: validate_variant_value(&mappings, ev.value)?,
+    })
+}
+
+fn validate_variant_value(
+    mappings: &Mappings,
+    v: VariantValue<String>,
+) -> Result<VariantValue<usize>> {
+    match v {
+        VariantValue::OnlyCtor => Ok(VariantValue::OnlyCtor),
+        VariantValue::PositionalCtor(typs) => {
+            typs.into_iter()
+                .map(|t| validate_type(&mappings, t))
+                .collect::<Result<Vec<_>>>()
+                .map(|x| VariantValue::PositionalCtor(x))
+        }
+        VariantValue::StructCtor(fields) => {
+            fields.into_iter()
+                .map(|f| validate_field(&mappings, f))
+                .collect::<Result<Vec<_>>>()
+                .map(|x| VariantValue::StructCtor(x))
+        },
+    }
+}
+
+fn validate_type(mappings: &Mappings, t: Type<String>) -> Result<Type<usize>> {
+    match t {
+        Type::Atomic(t) => Ok(Type::Atomic(t)),
+        Type::Reference(r) => mappings
+            .get(&r.name)
+            .ok_or(anyhow!("Reference {} not found", r.name).into())
+            .and_then(|i| {
+                let params = r
+                    .type_parameters
+                    .into_iter()
+                    .map(|t| validate_type(&mappings, t))
+                    .collect::<Result<Vec<_>>>();
+
+                Ok(Type::Reference(RefType {
+                    location: r.location,
+                    name: *i,
+                    type_parameters: params?,
+                }))
+            }),
+        Type::Builtin(b) => {
+            let b2 = match b {
+                Builtin::List(inner) => Builtin::List(Box::new(validate_type(mappings, *inner)?)),
+                Builtin::Optional(inner) => {
+                    Builtin::Optional(Box::new(validate_type(mappings, *inner)?))
+                }
+                Builtin::Map(k, v) => Builtin::Map(
+                    Box::new(validate_type(mappings, *k)?),
+                    Box::new(validate_type(mappings, *v)?),
+                ),
+            };
+            Ok(Type::Builtin(b2))
+        }
+    }
+}
