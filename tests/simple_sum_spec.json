@@ -1,0 +1,97 @@
+{
+  "description": "Simple sum type with only atomic and builtin in variants",
+  "schema": "simple_sum.dare",
+  "tests": {
+    "SimpleSum": [
+      {
+        "description": "null data is invalid",
+        "valid": false,
+        "data": null
+      },
+      {
+        "description": "unknown tag",
+        "valid": false,
+        "data": {
+          "tag": "doesn't exist"
+        }
+      },
+      {
+        "description": "invalid tag",
+        "valid": false,
+        "data": {
+          "tag": "NoData"
+        }
+      },
+      {
+        "description": "valid NoData variant",
+        "valid": true,
+        "data": {
+          "tag": "nothing"
+        }
+      },
+      {
+        "description": "valid OneArg variant",
+        "valid": true,
+        "data": {
+          "tag": "OneArg",
+          "contents": 42
+        }
+      },
+      {
+        "description": "invalid shape for OneArg variant",
+        "valid": false,
+        "data": {
+          "tag": "OneArg",
+          "contents": [
+            42
+          ]
+        }
+      },
+      {
+        "description": "invalid type for OneArg variant",
+        "valid": false,
+        "data": {
+          "tag": "OneArg",
+          "contents": "42"
+        }
+      },
+      {
+        "description": "valid TwoArgs variant",
+        "valid": true,
+        "data": {
+          "tag": "TwoArgs",
+          "contents": [
+            "foo",
+            [
+              true,
+              false
+            ]
+          ]
+        }
+      },
+      {
+        "description": "invvalid TwoArgs: wrong length",
+        "valid": false,
+        "data": {
+          "tag": "TwoArgs",
+          "contents": [
+            "foo",
+            [],
+            true
+          ]
+        }
+      },
+      {
+        "description": "invvalid TwoArgs: invalid types",
+        "valid": false,
+        "data": {
+          "tag": "TwoArgs",
+          "contents": [
+            10,
+            ["foo"]
+          ]
+        }
+      }
+    ]
+  }
+}

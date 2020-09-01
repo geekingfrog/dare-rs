@@ -31,6 +31,7 @@
         "valid": true,
         "data": {
           "name": "Charlie",
+          "customerEmail": null,
           "age": 42,
           "nicks": []
         }

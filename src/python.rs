@@ -226,8 +226,6 @@ fn gen_py_struct(s: &Struct<ResolvedReference>) -> Vec<PyToken> {
 
     let struct_class = pyclass(&s.name, vec![], body);
     tokens.extend(struct_class);
-    // let struct_td = pyclass(format!("{}TypedDict", s.name).as_ref(), vec![td], body);
-    // tokens.extend(struct_td);
 
     tokens
 }
@@ -355,10 +353,52 @@ fn get_parse_function(t: &Type<ResolvedReference>, name: &str, depth: u8) -> Str
 
 /// Dual of get_parse_function, returns a String representing the function to convert
 /// the given type into json representation
-fn get_serialize_function(t: &Type<ResolvedReference>, name: &str) -> String {
+fn get_dump_function(t: &Type<ResolvedReference>, name: &str, depth: u8) -> Option<String> {
     match t {
-        Type::Atomic(_) => name.to_owned(),
-        Type::Builtin(_) => todo!(),
+        Type::Atomic(at) => match at {
+            AtomicType::Bytes => {
+                if depth == 0 {
+                    Some(format!("dump_bytes({})", name))
+                } else {
+                    Some("dump_bytes".to_owned())
+                }
+            }
+            _ => None,
+        },
+        Type::Builtin(b) => match b {
+            Builtin::List(t) => {
+                match get_dump_function(t, name, depth + 1) {
+                    // the inner type doesn't need any conversion, so the list
+                    // itself also doesn't need conversion
+                    None => None,
+                    Some(d) => {
+                        if depth == 0 {
+                            Some(format!("dump_list({}, {})", d, name))
+                        } else {
+                            Some(format!("lambda x: dump_list({}, x)", d))
+                        }
+                    }
+                }
+            }
+            Builtin::Optional(t) => {
+                match get_dump_function(t, name, depth + 1) {
+                    // the inner type doesn't need any conversion, so the type
+                    // itself also doesn't need conversion
+                    None => None,
+                    Some(d) => {
+                        if depth == 0 {
+                            Some(format!("dump_optional({}, {})", d, name))
+                        } else {
+                            Some(format!("lambda x: dump_optional({}, x)", d))
+                        }
+                    }
+                }
+            }
+            Builtin::Map(_, _) => todo!(),
+        },
+        // References shouldn't be too hard, simply call .to_json on them if
+        // it's not an atomic or builtin.
+        // The typing may be a bit more tricky when it comes to generics.
         Type::Reference(_) => todo!(),
     }
 }
@@ -465,7 +505,7 @@ fn gen_py_sum_type(mut gen_ctx: &mut GenCtx, e: &Enum<ResolvedReference>) -> PyT
     for variant in &e.variants {
         let arg = match variant.value {
             VariantValue::OnlyCtor => "",
-            _ => "data",
+            _ => "contents",
         };
         from_json_body.push(
             If::new(
@@ -545,7 +585,7 @@ fn gen_enum_variant(
                 typs.push("[".into());
                 typs.extend(intersperce(
                     ", ".into(),
-                    refs.iter().map(|t| t.clone().into()).collect(),
+                    refs.iter().map(|t| t.get_json_type().into()).collect(),
                 ));
                 typs.push("]".into());
                 td_class_body.push(typed_attr("contents", typs, None));
@@ -567,15 +607,15 @@ fn gen_enum_variant(
 
     match &variant.value {
         VariantValue::OnlyCtor => {
+            let tag_val = variant.alias.as_ref().unwrap_or(&variant.name);
             class_body.extend(py_fn(
                 "to_json",
                 vec!["self".into()],
-                vec![format!(r#"return {{"tag": "{}"}}"#, variant.name.to_pascal_case()).into()],
+                vec![format!(r#"return {{"tag": "{}"}}"#, tag_val).into()],
                 Some("Any".into()),
             ));
         }
 
-        // TODO gen TypedDict for the variants.to_json outputs
         VariantValue::PositionalCtor(refs) => {
             if refs.len() == 1 {
                 class_body.push(typed_attr(
@@ -602,9 +642,9 @@ fn gen_enum_variant(
                     "to_json",
                     vec!["self".into()],
                     vec![format!(
-                        r#"return {{"tag": "{}", "contents": self.{}}}"#,
+                        r#"return {{"tag": "{}", "contents": {}}}"#,
                         variant.name.to_pascal_case(),
-                        get_serialize_function(&refs[0], "inner")
+                        get_dump_function(&refs[0], "self.inner", 0).unwrap_or("self.inner".to_owned())
                     )
                     .into()],
                     Some(td_name.into()),
@@ -641,6 +681,36 @@ fn gen_enum_variant(
                     )
                     .into()],
                     Some("None".into()),
+                ));
+
+                class_body.push(PyToken::NewLine);
+
+                let to_json_contents = intersperce(
+                    ", ".into(),
+                    refs.iter()
+                        .enumerate()
+                        .map(|(idx, r)| {
+                            let val_name = format!("self.inner[{}]", idx);
+                            get_dump_function(r, &val_name, 0)
+                                .unwrap_or(val_name)
+                                .into()
+                        })
+                        .collect(),
+                );
+
+                class_body.extend(py_fn(
+                    "to_json",
+                    vec!["self".into()],
+                    vec![
+                        format!(
+                            r#"return {{"tag": "{}", "contents": ("#,
+                            variant.name.to_pascal_case(),
+                        )
+                        .into(),
+                        PyToken::Block(to_json_contents),
+                        ")}".into(),
+                    ],
+                    Some(td_name.into()),
                 ));
             }
         }
@@ -838,6 +908,39 @@ fn render(conf: &PyConfig, mut ctx: &mut FormatContext, tokens: &[PyToken]) -> S
         }
     }
     buf.join("")
+}
+
+impl Type<ResolvedReference> {
+    /// Returns a python type hint for the json representation of
+    /// this type after serialization.
+    fn get_json_type(&self) -> String {
+        match &self {
+            Type::Atomic(t) => match t {
+                AtomicType::Str => "str",
+                AtomicType::UInt => "int",
+                AtomicType::Int => "int",
+                AtomicType::Int8 => "int",
+                AtomicType::Int16 => "int",
+                AtomicType::Int32 => "int",
+                AtomicType::Int64 => "int",
+                AtomicType::UInt8 => "int",
+                AtomicType::UInt16 => "int",
+                AtomicType::UInt32 => "int",
+                AtomicType::UInt64 => "int",
+                AtomicType::Float => "float",
+                AtomicType::Bool => "bool",
+                // bytes get converted to base64
+                AtomicType::Bytes => "str",
+            }
+            .to_owned(),
+            Type::Builtin(b) => match b {
+                Builtin::List(inner) => format!("List[{}]", inner.get_json_type()),
+                Builtin::Optional(inner) => format!("Optional[{}]", inner.get_json_type()),
+                Builtin::Map(_k, _v) => todo!(),
+            },
+            Type::Reference(_) => todo!(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

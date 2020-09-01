@@ -13,6 +13,7 @@ class ValidationError(Exception):
         super().__init__(message)
 
 
+T = TypeVar("T")
 K = TypeVar("K")
 V = TypeVar("V")
 
@@ -130,3 +131,17 @@ def parse_map(
     if errors:
         raise ValidationError(message=errors)
     return result
+
+
+def dump_bytes(v: bytes) -> str:
+    return base64.b64encode(v).decode("utf-8")
+
+
+def dump_optional(dump: Callable[[T], Any], v: Optional[T]) -> Any:
+    if v is None:
+        return v
+    return dump(v)
+
+
+def dump_list(dump_item: Callable[[T], Any], v: List[T]) -> List[Any]:
+    return [dump_item(x) for x in v]

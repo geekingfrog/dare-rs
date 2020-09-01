@@ -6,49 +6,61 @@
 import json
 import pytest
 from operator import itemgetter
-from . import atomic_struct, simple_enum
+from . import atomic_struct, simple_enum, simple_sum
+from typing import Any
 
 
-def gather_tests(spec_name):
-    with open(spec_name) as fd:
-        spec = json.load(fd)
-    return spec["tests"]
+def gather_tests(specs_and_modules):
+    tests = []
+    for spec_name, module in specs_and_modules:
+        with open(spec_name) as fd:
+            spec = json.load(fd)
+        for test_name, ts in spec["tests"].items():
+            for t in ts:
+                tests.append(
+                    {
+                        "description": t["description"],
+                        "test": t,
+                        "obj": test_name,
+                        "module": module,
+                    }
+                )
+    return tests
 
 
 @pytest.mark.parametrize(
     "test_spec",
-    gather_tests("../atomic_struct_spec.json")["Customer"],
+    gather_tests(
+        [
+            ("../atomic_struct_spec.json", atomic_struct),
+            ("../simple_enum_spec.json", simple_enum),
+            ("../simple_sum_spec.json", simple_sum),
+        ]
+    ),
     ids=itemgetter("description"),
 )
 def test_atomic_struct_customer(test_spec):
-    if test_spec["valid"]:
-        atomic_struct.Customer.from_json(test_spec["data"])
+
+    test = test_spec["test"]
+    func = getattr(test_spec["module"], test_spec["obj"]).from_json
+    if test["valid"]:
+        parsed = func(test["data"])
+        assert tuple_to_array(parsed.to_json()) == test["data"]
     else:
-        with pytest.raises(atomic_struct.ValidationError):
-            atomic_struct.Customer.from_json(test_spec["data"])
+        with pytest.raises(getattr(test_spec["module"], "ValidationError")):
+            func(test["data"])
 
 
-@pytest.mark.parametrize(
-    "test_spec",
-    gather_tests("../atomic_struct_spec.json")["Student"],
-    ids=itemgetter("description"),
-)
-def test_atomic_struct_student(test_spec):
-    if test_spec["valid"]:
-        atomic_struct.Student.from_json(test_spec["data"])
-    else:
-        with pytest.raises(atomic_struct.ValidationError):
-            atomic_struct.Student.from_json(test_spec["data"])
-
-
-@pytest.mark.parametrize(
-    "test_spec",
-    gather_tests("../simple_enum_spec.json")["SimpleEnum"],
-    ids=itemgetter("description"),
-)
-def test_simple_enum(test_spec):
-    if test_spec["valid"]:
-        simple_enum.SimpleEnum.from_json(test_spec["data"])
-    else:
-        with pytest.raises(simple_enum.ValidationError):
-            simple_enum.SimpleEnum.from_json(test_spec["data"])
+def tuple_to_array(x: Any) -> Any:
+    """
+    doing a == b for json object will raise error when comparing
+    tuple with array. The `to_json` produced by dare is using
+    tuples for sum types, which will get converted to arrays
+    when using json.dumps.
+    Convert any tuple into array so we can test against the json spec.
+    """
+    if isinstance(x, (tuple, list)):
+        return [tuple_to_array(v) for v in x]
+    if isinstance(x, dict):
+        return {tuple_to_array(k): tuple_to_array(v) for (k, v) in x.items()}
+    return x

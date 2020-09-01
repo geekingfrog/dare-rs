@@ -3,3 +3,4 @@ __pycache__
 venv
 atomic_struct.py
 simple_enum.py
+simple_sum.py
