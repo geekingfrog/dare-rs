@@ -14,3 +14,9 @@ if [ ! -f ./venv/bin/pytest ]; then
 fi
 
 ./venv/bin/pytest -vv .
+
+if [ ! -f ./venv/bin/mypy ]; then
+  python -m venv venv
+  ./venv/bin/pip install mypy
+fi
+./venv/bin/mypy --strict .
