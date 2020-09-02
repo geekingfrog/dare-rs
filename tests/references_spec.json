@@ -1,0 +1,223 @@
+{
+  "description": "References between enum and sum",
+  "schema": "references.dare",
+  "tests": {
+    "Bar": [
+      {
+        "description": "valid nested json",
+        "valid": true,
+        "data": {
+          "name": "mybar",
+          "val": {
+            "x": 42,
+            "y": 3.14
+          },
+          "choice": "Yes",
+          "sum": {
+            "tag": "Ctor",
+            "contents": "hello"
+          }
+        }
+      },
+      {
+        "description": "invalid nested struct",
+        "valid": false,
+        "data": {
+          "name": "mybar",
+          "val": {
+            "x": 42,
+            "y": "not_valid"
+          },
+          "choice": "Yes",
+          "sum": {
+            "tag": "Ctor",
+            "contents": "hello"
+          }
+        }
+      },
+      {
+        "description": "invalid nested enum",
+        "valid": false,
+        "data": {
+          "name": "mybar",
+          "val": {
+            "x": 42,
+            "y": 3
+          },
+          "choice": "doesn't exist",
+          "sum": {
+            "tag": "Ctor",
+            "contents": "hello"
+          }
+        }
+      },
+      {
+        "description": "invalid nested sum type (tag)",
+        "valid": false,
+        "data": {
+          "name": "mybar",
+          "val": {
+            "x": 42,
+            "y": 3
+          },
+          "choice": "Yes",
+          "sum": {
+            "tag": "not-a-constructor",
+            "contents": "hello"
+          }
+        }
+      },
+      {
+        "description": "invalid nested sum type (contents)",
+        "valid": false,
+        "data": {
+          "name": "mybar",
+          "val": {
+            "x": 42,
+            "y": 3
+          },
+          "choice": "Yes",
+          "sum": {
+            "tag": "Ctor",
+            "contents": true
+          }
+        }
+      }
+    ],
+    "Items": [
+      {
+        "description": "valid sum type - noItem",
+        "valid": true,
+        "data": {
+          "tag": "NoItem"
+        }
+      },
+      {
+        "description": "valid sum type - Some",
+        "valid": true,
+        "data": {
+          "tag": "Some",
+          "contents": {
+            "x": 1,
+            "y": 1
+          }
+        }
+      },
+      {
+        "description": "invalid sum type - Some",
+        "valid": false,
+        "data": {
+          "tag": "Some",
+          "contents": {
+            "x": 1,
+            "y": "not a float"
+          }
+        }
+      },
+      {
+        "description": "valid sum type - More",
+        "valid": true,
+        "data": {
+          "tag": "More",
+          "contents": [
+            {
+              "x": 1,
+              "y": 1
+            },
+            {
+              "name": "mybar",
+              "val": {
+                "x": 42,
+                "y": 3.14
+              },
+              "choice": "Yes",
+              "sum": {
+                "tag": "Ctor",
+                "contents": "hello"
+              }
+            },
+            "Yes"
+          ]
+        }
+      },
+      {
+        "description": "invalid sum type - More - error in foo",
+        "valid": false,
+        "data": {
+          "tag": "More",
+          "contents": [
+            {
+              "x": 1,
+              "y": "not a number"
+            },
+            {
+              "name": "mybar",
+              "val": {
+                "x": 42,
+                "y": 3.14
+              },
+              "choice": "Yes",
+              "sum": {
+                "tag": "Ctor",
+                "contents": "hello"
+              }
+            },
+            "Yes"
+          ]
+        }
+      },
+      {
+        "description": "invalid sum type - More - error in bar",
+        "valid": false,
+        "data": {
+          "tag": "More",
+          "contents": [
+            {
+              "x": 1,
+              "y": 1
+            },
+            {
+              "name": "mybar",
+              "val": {
+                "x": 42,
+                "y": 3.14
+              },
+              "choice": "ooops",
+              "sum": {
+                "tag": "Ctor",
+                "contents": "hello"
+              }
+            },
+            "Yes"
+          ]
+        }
+      },
+      {
+        "description": "invalid sum type - More - error in sum",
+        "valid": false,
+        "data": {
+          "tag": "More",
+          "contents": [
+            {
+              "x": 1,
+              "y": 1
+            },
+            {
+              "name": "mybar",
+              "val": {
+                "x": 42,
+                "y": 3.14
+              },
+              "choice": "ooops",
+              "sum": {
+                "tag": "Ctor",
+                "contents": 12345
+              }
+            },
+            "Yes"
+          ]
+        }
+      }
+    ]
+  }
+}

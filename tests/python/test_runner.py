@@ -6,11 +6,24 @@
 import json
 import pytest
 from operator import itemgetter
-from . import atomic_struct, simple_enum, simple_sum
-from typing import Any
+from dare import atomic_struct, simple_enum, simple_sum, references
+from typing import Any, List, Tuple, TypedDict, cast
 
 
-def gather_tests(specs_and_modules):
+class Test(TypedDict):
+    description: str
+    valid: bool
+    data: Any
+
+
+class TestSpec(TypedDict):
+    description: str
+    test: Test
+    obj: str
+    module: Any
+
+
+def gather_tests(specs_and_modules: List[Tuple[str, Any]]) -> List[TestSpec]:
     tests = []
     for spec_name, module in specs_and_modules:
         with open(spec_name) as fd:
@@ -18,28 +31,32 @@ def gather_tests(specs_and_modules):
         for test_name, ts in spec["tests"].items():
             for t in ts:
                 tests.append(
-                    {
-                        "description": t["description"],
-                        "test": t,
-                        "obj": test_name,
-                        "module": module,
-                    }
+                    cast(
+                        TestSpec,
+                        {
+                            "description": t["description"],
+                            "test": t,
+                            "obj": test_name,
+                            "module": module,
+                        },
+                    )
                 )
     return tests
 
 
-@pytest.mark.parametrize(
+@pytest.mark.parametrize(  # type: ignore
     "test_spec",
     gather_tests(
         [
             ("../atomic_struct_spec.json", atomic_struct),
             ("../simple_enum_spec.json", simple_enum),
             ("../simple_sum_spec.json", simple_sum),
+            ("../references_spec.json", references),
         ]
     ),
     ids=itemgetter("description"),
 )
-def test_atomic_struct_customer(test_spec):
+def test_atomic_struct_customer(test_spec: TestSpec) -> None:
 
     test = test_spec["test"]
     func = getattr(test_spec["module"], test_spec["obj"]).from_json
@@ -49,6 +66,10 @@ def test_atomic_struct_customer(test_spec):
     else:
         with pytest.raises(getattr(test_spec["module"], "ValidationError")):
             func(test["data"])
+
+
+# def test_reference_sum_type():
+#     references.
 
 
 def tuple_to_array(x: Any) -> Any:

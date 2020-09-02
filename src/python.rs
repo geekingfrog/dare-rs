@@ -105,7 +105,7 @@ fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct<ResolvedReference>) -> Vec<PyToken
             .map(|f| {
                 typed_attr(
                     &f.name.to_snake_case(),
-                    vec![f.typ.to_py_token(&gen_ctx)],
+                    vec![f.typ.get_python_type(&gen_ctx).into()],
                     None,
                 )
             })
@@ -281,7 +281,7 @@ fn gather_imports(tokens: &[PyToken]) -> ImportMap {
         ImportEntry {
             full: false,
             specifics: vec![
-                "TypeVar", "Any", "cast", "Dict", "List", "Optional", "Callable", "Union",
+                "TypeVar", "Any", "cast", "Dict", "List", "Optional", "Callable", "Union", "Tuple",
             ],
         },
     );
@@ -413,7 +413,7 @@ fn get_dump_function(
                         if depth == 0 {
                             Some(format!("dump_list({}, {})", d, name))
                         } else {
-                            Some(format!("lambda x: dump_list({}, x)", d))
+                            Some(format!("lambda x{}: dump_list({}, x{})", depth, d, depth))
                         }
                     }
                 }
@@ -427,12 +427,27 @@ fn get_dump_function(
                         if depth == 0 {
                             Some(format!("dump_optional({}, {})", d, name))
                         } else {
-                            Some(format!("lambda x: dump_optional({}, x)", d))
+                            Some(format!(
+                                "lambda x{}: dump_optional({}, x{})",
+                                depth, d, depth
+                            ))
                         }
                     }
                 }
             }
-            Builtin::Map(_, _) => todo!(),
+            Builtin::Map(_k, v) => {
+                // TODO check if the type for the key can be serialised as a string
+                match get_dump_function(&_gen_ctx, v, name, depth + 1) {
+                    Some(f) => {
+                        if depth == 0 {
+                            Some(format!("dump_object({}, {})", f, name))
+                        } else {
+                            Some(format!("lambda x{}: dump_object({}, x{})", depth, f, depth))
+                        }
+                    }
+                    None => None,
+                }
+            }
         },
         Type::Reference(r) => {
             // let referenced_decl = &gen_ctx.top_declarations[r.name];
@@ -526,11 +541,23 @@ fn gen_py_sum_type(mut gen_ctx: &mut GenCtx, e: &Enum<ResolvedReference>) -> PyT
         tokens.push(PyToken::NewLine);
     }
 
+    // the union of all variants
     tokens.push(format!("{}TypeDef = ", e.name).into());
     tokens.push(typed_union(
         e.variants.iter().map(|v| v.name.clone().into()).collect(),
     ));
     tokens.push(PyToken::NewLine);
+
+    // the union of all variants after calling to_json() on them
+    tokens.push(format!("{}TypedDict = ", e.name).into());
+    tokens.push(typed_union(
+        e.variants
+            .iter()
+            .map(|v| format!("{}TypedDict", v.name).into())
+            .collect(),
+    ));
+    tokens.push(PyToken::NewLine);
+
     tokens.push(PyToken::NewLine);
 
     let mut from_json_body = vec![];
@@ -967,6 +994,29 @@ fn render(conf: &PyConfig, mut ctx: &mut FormatContext, tokens: &[PyToken]) -> S
 }
 
 impl Type<ResolvedReference> {
+    /// Returns a python type hint for the type itself
+    /// It's usually the name if the type except for sums
+    fn get_python_type(&self, gen_ctx: &GenCtx) -> String {
+        match self {
+            Type::Atomic(at) => atomic_py_instance(at).0.to_owned(),
+            Type::Reference(r) => {
+                let referenced_decl = &gen_ctx.top_declarations[r.name];
+                referenced_decl.get_py_python_type()
+            }
+            Type::Builtin(b) => match b {
+                Builtin::List(inner) => format!("List[{}]", inner.get_python_type(&gen_ctx)),
+                Builtin::Optional(inner) => {
+                    format!("Optional[{}]", inner.get_python_type(&gen_ctx))
+                }
+                Builtin::Map(k, v) => format!(
+                    "Mapping[{}, {}]",
+                    k.get_python_type(&gen_ctx),
+                    v.get_python_type(&gen_ctx)
+                ),
+            },
+        }
+    }
+
     /// Returns a python type hint for the json representation of
     /// this type after serialization.
     fn get_json_type(&self, gen_ctx: &GenCtx) -> String {
@@ -992,11 +1042,15 @@ impl Type<ResolvedReference> {
             Type::Builtin(b) => match b {
                 Builtin::List(inner) => format!("List[{}]", inner.get_json_type(&gen_ctx)),
                 Builtin::Optional(inner) => format!("Optional[{}]", inner.get_json_type(&gen_ctx)),
-                Builtin::Map(_k, _v) => todo!(),
+                Builtin::Map(k, v) => format!(
+                    "Mapping[{}, {}]",
+                    k.get_json_type(&gen_ctx),
+                    v.get_json_type(&gen_ctx)
+                ),
             },
             Type::Reference(r) => {
                 let referenced_decl = &gen_ctx.top_declarations[r.name];
-                format!("{}TypedDict", referenced_decl.get_name())
+                referenced_decl.get_py_json_type()
             }
         }
     }
@@ -1192,6 +1246,37 @@ impl<'tokens> ImportEntry<'tokens> {
             s.insert(t);
         }
         self.specifics = s.into_iter().collect();
+    }
+}
+
+impl<T> TopDeclaration<T> {
+    fn get_py_python_type(&self) -> String {
+        match self {
+            TopDeclaration::Struct(s) => s.name.to_owned(),
+            TopDeclaration::Enum(e) => {
+                if e.is_simple_enum() {
+                    e.name.to_owned()
+                } else {
+                    format!("{}TypeDef", e.name)
+                }
+            }
+            TopDeclaration::Alias(_) => todo!(),
+        }
+    }
+
+    /// returns the type hint for the json object returned by `to_json`
+    fn get_py_json_type(&self) -> String {
+        match self {
+            TopDeclaration::Struct(s) => format!("{}TypedDict", s.name),
+            TopDeclaration::Enum(e) => {
+                if e.is_simple_enum() {
+                    "str".to_owned()
+                } else {
+                    format!("{}TypedDict", e.name)
+                }
+            }
+            TopDeclaration::Alias(_) => todo!(),
+        }
     }
 }
 

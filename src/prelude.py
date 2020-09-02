@@ -18,7 +18,7 @@ K = TypeVar("K")
 V = TypeVar("V")
 
 
-def parse_primitive(prim_type: type, msg: str, x: Any) -> V:
+def parse_primitive(prim_type: Union[type, Tuple[type, ...]], msg: str, x: Any) -> V:
     """Parse a non nullable primitive type"""
     if x is None:
         raise ValidationError(message="Missing data for required field")
@@ -40,7 +40,7 @@ def parse_int(x: Any) -> int:
 
 
 def parse_float(x: Any) -> float:
-    return parse_primitive(float, "Not a valid float", x)
+    return parse_primitive((float, int), "Not a valid float", x)
 
 
 def parse_bytes(x: Any) -> bytes:
@@ -145,3 +145,7 @@ def dump_optional(dump: Callable[[T], Any], v: Optional[T]) -> Any:
 
 def dump_list(dump_item: Callable[[T], Any], v: List[T]) -> List[Any]:
     return [dump_item(x) for x in v]
+
+
+def dump_object(dump_item: Callable[[T], Any], d: Dict[str, T]) -> Dict[str, Any]:
+    return {k: dump_item(v) for k, v in d.items()}

@@ -1,0 +1,26 @@
+enum Choice {
+  Yes,
+  No
+}
+
+enum SumRef {
+  Ctor(String)
+}
+
+struct Foo {
+  x: Int,
+  y: Float
+}
+
+struct Bar {
+  name: String,
+  val: Foo,
+  choice: Choice,
+  sum: SumRef,
+}
+
+enum Items {
+  NoItem,
+  Some(Foo),
+  More(Foo, Bar, Choice),
+}
