@@ -43,7 +43,6 @@ fn main() {
         .unwrap();
     dest.write_all(&python::render_python(&py_tokens).as_bytes())
         .unwrap();
-
 }
 
 fn parse(f: &File) -> Result<Vec<ast::TopDeclaration<String>>> {
@@ -62,6 +61,7 @@ mod test {
         location, Alias, AtomicType, Builtin, Enum, EnumVariant, Field, RefType, SrcSpan, Struct,
         Type, VariantValue,
     };
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn atomic_type() {

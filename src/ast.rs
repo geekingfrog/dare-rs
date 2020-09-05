@@ -244,18 +244,16 @@ fn validate_variant_value(
 ) -> Result<VariantValue<usize>> {
     match v {
         VariantValue::OnlyCtor => Ok(VariantValue::OnlyCtor),
-        VariantValue::PositionalCtor(typs) => {
-            typs.into_iter()
-                .map(|t| validate_type(&mappings, t))
-                .collect::<Result<Vec<_>>>()
-                .map(|x| VariantValue::PositionalCtor(x))
-        }
-        VariantValue::StructCtor(fields) => {
-            fields.into_iter()
-                .map(|f| validate_field(&mappings, f))
-                .collect::<Result<Vec<_>>>()
-                .map(|x| VariantValue::StructCtor(x))
-        },
+        VariantValue::PositionalCtor(typs) => typs
+            .into_iter()
+            .map(|t| validate_type(&mappings, t))
+            .collect::<Result<Vec<_>>>()
+            .map(|x| VariantValue::PositionalCtor(x)),
+        VariantValue::StructCtor(fields) => fields
+            .into_iter()
+            .map(|f| validate_field(&mappings, f))
+            .collect::<Result<Vec<_>>>()
+            .map(|x| VariantValue::StructCtor(x)),
     }
 }
 

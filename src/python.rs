@@ -1,6 +1,6 @@
 use crate::ast;
 use crate::ast::{
-    Alias, AtomicType, Builtin, Enum, Field, ResolvedReference, Struct, TopDeclaration, Type,
+    Alias, AtomicType, Builtin, Enum, ResolvedReference, Struct, TopDeclaration, Type,
     VariantValue,
 };
 use inflections::Inflect;
@@ -92,7 +92,7 @@ fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct<ResolvedReference>) -> Vec<PyToken
             .map(|f| typed_attr(&f.name, vec![f.typ.get_json_type(&gen_ctx).into()], None))
             .collect(),
     );
-    let struct_td = pyclass(&struct_td_name, vec![td], struct_td_attrs);
+    let struct_td = py_class(&struct_td_name, vec![td], struct_td_attrs);
     tokens.extend(struct_td);
 
     tokens.push(PyToken::NewLine);
@@ -246,7 +246,7 @@ fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct<ResolvedReference>) -> Vec<PyToken
     tokens.push(dataclass);
     tokens.push(PyToken::NewLine);
 
-    let struct_class = pyclass(&s.name, vec![], body);
+    let struct_class = py_class(&s.name, vec![], body);
     tokens.extend(struct_class);
 
     tokens
@@ -449,7 +449,7 @@ fn get_dump_function(
                 }
             }
         },
-        Type::Reference(r) => {
+        Type::Reference(_r) => {
             // let referenced_decl = &gen_ctx.top_declarations[r.name];
             // TODO check if the referenced top declaration is an alias. In this case
             // simply calling to_json on it will not work
@@ -531,7 +531,7 @@ fn gen_simple_enum(e: &Enum<ResolvedReference>) -> PyToken {
         Some(format!(r#""{}""#, e.name).into()),
     ));
 
-    PyToken::Block(pyclass(&e.name.to_pascal_case(), vec![enum_class], body))
+    PyToken::Block(py_class(&e.name.to_pascal_case(), vec![enum_class], body))
 }
 
 fn gen_py_sum_type(mut gen_ctx: &mut GenCtx, e: &Enum<ResolvedReference>) -> PyToken {
@@ -594,7 +594,7 @@ fn gen_py_sum_type(mut gen_ctx: &mut GenCtx, e: &Enum<ResolvedReference>) -> PyT
     from_json_body
         .push(format!(r#"raise ValidationError(message="unknown tag {{}}".format(tag))"#).into());
 
-    tokens.extend(pyclass(
+    tokens.extend(py_class(
         &e.name.to_pascal_case(),
         vec![],
         vec![
@@ -672,7 +672,7 @@ fn gen_enum_variant(
         VariantValue::StructCtor(_) => todo!("anon struct in sum type"),
     }
 
-    tokens.extend(pyclass(
+    tokens.extend(py_class(
         &td_name,
         vec![type_import("TypedDict")],
         td_class_body,
@@ -803,7 +803,7 @@ fn gen_enum_variant(
     tokens.push("@".into());
     tokens.push(dataclass);
     tokens.push(PyToken::NewLine);
-    tokens.extend(pyclass(&variant.name.to_pascal_case(), vec![], class_body));
+    tokens.extend(py_class(&variant.name.to_pascal_case(), vec![], class_body));
 
     PyToken::Block(tokens)
 }
@@ -1284,7 +1284,7 @@ fn indent(i: i8) -> PyToken {
     PyToken::Indent(i)
 }
 
-fn pyclass(class_name: &str, super_classes: Vec<PyToken>, body: Vec<PyToken>) -> Vec<PyToken> {
+fn py_class(class_name: &str, super_classes: Vec<PyToken>, body: Vec<PyToken>) -> Vec<PyToken> {
     let mut tokens = Vec::new();
     tokens.push("class".into());
     tokens.push(PyToken::Space);
@@ -1367,13 +1367,7 @@ fn typed_attr(name: &str, typ: Vec<PyToken>, default_val: Option<PyToken>) -> Py
     PyToken::Block(tokens)
 }
 
-/// Turn an ast::Field into a field declaration like:
-/// foo: int
-fn typed_field(gen_ctx: &GenCtx, f: &Field<ResolvedReference>) -> PyToken {
-    typed_attr(&f.name, vec![f.typ.to_py_token(&gen_ctx)], None)
-}
-
-/// return the same type, with all Optional
+/// return the same type, with all Optional removed
 fn unpack_optional(typ: Type<ResolvedReference>) -> Type<ResolvedReference> {
     match typ {
         Type::Builtin(Builtin::Optional(t)) => *t,
