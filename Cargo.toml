@@ -16,6 +16,9 @@ anyhow = "1.0.32"
 structopt = "0.3"
 
 inflections = "1.1.1"
+# used for tests, but need to be in #[derive(…)] code :/
+strum = "0.19.2"
+strum_macros = "0.19.2"
 
 [dev-dependencies]
 pretty_assertions = "0.6.1"

@@ -2,6 +2,10 @@
 extern crate anyhow;
 use anyhow::Result;
 
+#[macro_use]
+extern crate strum_macros;
+extern crate strum;
+
 use std::fs::File;
 use std::io::{prelude::*, BufReader};
 use std::path::PathBuf;
@@ -9,6 +13,7 @@ use structopt::StructOpt;
 
 mod ast;
 mod dare;
+mod lexer;
 mod python;
 
 #[derive(StructOpt, Debug)]

@@ -159,7 +159,7 @@ match {
   "type",
   "List",
   "Map",
-  "Option",
+  "Optional",
   "String",
   "UInt",
   "Int",
