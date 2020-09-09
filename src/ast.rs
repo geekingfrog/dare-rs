@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::fmt::Debug;
 use std::{collections::BTreeMap, vec::Vec};
+use crate::lexer;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum TopDeclaration<Reference> {
@@ -160,11 +161,11 @@ pub enum Builtin<Reference> {
 
 #[derive(Debug, PartialEq, Eq, Default, Clone, Copy)]
 pub struct SrcSpan {
-    pub start: usize,
-    pub end: usize,
+    pub start: lexer::Loc,
+    pub end: lexer::Loc,
 }
 
-pub fn location(start: usize, end: usize) -> SrcSpan {
+pub fn location(start: lexer::Loc, end: lexer::Loc) -> SrcSpan {
     SrcSpan { start, end }
 }
 

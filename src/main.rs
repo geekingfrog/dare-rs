@@ -16,6 +16,8 @@ mod dare;
 mod lexer;
 mod python;
 
+use lexer::{Lexer, Loc};
+
 #[derive(StructOpt, Debug)]
 // #[structopt(name = "basic")]
 struct Opt {
@@ -55,7 +57,7 @@ fn parse(f: &File) -> Result<Vec<ast::TopDeclaration<String>>> {
     let mut content = String::new();
     buf_reader.read_to_string(&mut content)?;
     dare::TopDeclarationsParser::new()
-        .parse(&content)
+        .parse(Lexer::new(&content))
         .map_err(|e| anyhow!("Parse error {}", e))
 }
 
@@ -63,24 +65,39 @@ fn parse(f: &File) -> Result<Vec<ast::TopDeclaration<String>>> {
 mod test {
     use super::*;
     use ast::{
-        location, Alias, AtomicType, Builtin, Enum, EnumVariant, Field, RefType, SrcSpan, Struct,
+        Alias, AtomicType, Builtin, Enum, EnumVariant, Field, RefType, SrcSpan, Struct,
         Type, VariantValue,
     };
     use pretty_assertions::assert_eq;
 
+    fn loc(s: (usize, usize), e: (usize, usize)) -> SrcSpan {
+        SrcSpan {
+            start: Loc {
+                line: s.0,
+                column: s.1,
+            },
+            end: Loc {
+                line: e.0,
+                column: e.1,
+            },
+        }
+    }
+
     #[test]
     fn atomic_type() {
-        let expr = dare::AtomicTypeParser::new().parse("String").unwrap();
+        let expr = dare::AtomicTypeParser::new()
+            .parse(Lexer::new("String"))
+            .unwrap();
         assert_eq!(expr, AtomicType::Str);
     }
 
     #[test]
     fn ref_type() {
-        let expr = dare::RefTypeParser::new().parse("Foo").unwrap();
+        let expr = dare::RefTypeParser::new().parse(Lexer::new("Foo")).unwrap();
         assert_eq!(
             expr,
             RefType {
-                location: location(0, 3),
+                location: loc((1, 1), (1, 4)),
                 name: "Foo".to_string(),
                 type_parameters: vec![]
             }
@@ -90,19 +107,19 @@ mod test {
     #[test]
     fn parametrised_ref_type() {
         let expr = dare::RefTypeParser::new()
-            .parse("Foo<T1, Bar<T1>>")
+            .parse(Lexer::new("Foo<T1, Bar<T1>>"))
             .unwrap();
         assert_eq!(
             expr,
             RefType {
-                location: location(0, 16),
+                location: loc((1, 1), (1, 17)),
                 name: "Foo".to_string(),
                 type_parameters: vec![
-                    make_generic("T1", vec![], location(4, 6)),
+                    make_generic("T1", vec![], loc((1, 5), (1, 7))),
                     Type::Reference(RefType {
-                        location: location(8, 15),
+                        location: loc((1, 9), (1, 16)),
                         name: "Bar".to_string(),
-                        type_parameters: vec![make_generic("T1", vec![], location(12, 14))],
+                        type_parameters: vec![make_generic("T1", vec![], loc((1, 13), (1, 15)))],
                     }),
                 ]
             }
@@ -111,11 +128,13 @@ mod test {
 
     #[test]
     fn atomic_ref_type() {
-        let expr = dare::RefTypeParser::new().parse("Foo<Int>").unwrap();
+        let expr = dare::RefTypeParser::new()
+            .parse(Lexer::new("Foo<Int>"))
+            .unwrap();
         assert_eq!(
             expr,
             RefType {
-                location: location(0, 8),
+                location: loc((1, 1), (1, 9)),
                 name: "Foo".to_string(),
                 type_parameters: vec![Type::Atomic(AtomicType::Int),]
             }
@@ -125,27 +144,27 @@ mod test {
     #[test]
     fn simple_struct() {
         let expr = dare::StructParser::new()
-            .parse(
+            .parse(Lexer::new(
                 "struct MyStruct {
             field1: Int,
             field2: Bool,
         }",
-            )
+            ))
             .unwrap();
         assert_eq!(
             expr,
             Struct {
-                location: location(0, 78),
+                location: loc((1, 1), (4, 10)),
                 name: "MyStruct".to_string(),
                 type_parameters: vec![],
                 fields: vec![
                     Field {
-                        location: location(30, 41),
+                        location: loc((2, 13), (2, 24)),
                         name: "field1".to_string(),
                         typ: Type::Atomic(AtomicType::Int)
                     },
                     Field {
-                        location: location(55, 67),
+                        location: loc((3, 13), (3, 25)),
                         name: "field2".to_string(),
                         typ: Type::Atomic(AtomicType::Bool)
                     }
@@ -157,19 +176,19 @@ mod test {
     #[test]
     fn parametrised_struct() {
         let expr = dare::StructParser::new()
-            .parse("struct MyStruct<Foo, Bar> {field1: Foo}")
+            .parse(Lexer::new("struct MyStruct<Foo, Bar> {field1: Foo}"))
             .unwrap();
 
         assert_eq!(
             expr,
             Struct {
-                location: location(0, 39),
+                location: loc((1, 1), (1, 40)),
                 name: "MyStruct".to_string(),
                 type_parameters: vec!["Foo".to_string(), "Bar".to_string()],
                 fields: vec![Field {
-                    location: location(27, 38),
+                    location: loc((1, 28), (1, 39)),
                     name: "field1".to_string(),
-                    typ: make_generic("Foo", vec![], location(35, 38)),
+                    typ: make_generic("Foo", vec![], loc((1, 36), (1, 39))),
                 },]
             }
         )
@@ -177,23 +196,25 @@ mod test {
 
     #[test]
     fn simple_enum() {
-        let expr = dare::EnumParser::new().parse("enum Base {A, G}").unwrap();
+        let expr = dare::EnumParser::new()
+            .parse(Lexer::new("enum Base {A, G}"))
+            .unwrap();
 
         assert_eq!(
             expr,
             Enum {
-                location: location(0, 16),
+                location: loc((1, 1), (1, 17)),
                 name: "Base".to_string(),
                 type_parameters: vec![],
                 variants: vec![
                     EnumVariant {
-                        location: location(11, 12),
+                        location: loc((1, 12), (1, 13)),
                         name: "A".to_string(),
                         alias: None,
                         value: VariantValue::OnlyCtor,
                     },
                     EnumVariant {
-                        location: location(14, 15),
+                        location: loc((1, 15), (1, 16)),
                         name: "G".to_string(),
                         alias: None,
                         value: VariantValue::OnlyCtor,
@@ -206,24 +227,24 @@ mod test {
     #[test]
     fn enum_with_atomic_type() {
         let expr = dare::EnumParser::new()
-            .parse("enum MaybeInt {Nothing, Just(Int)}")
+            .parse(Lexer::new("enum MaybeInt {Nothing, Just(Int)}"))
             .unwrap();
 
         assert_eq!(
             expr,
             Enum {
-                location: location(0, 34),
+                location: loc((1, 1), (1, 35)),
                 name: "MaybeInt".to_string(),
                 type_parameters: vec![],
                 variants: vec![
                     EnumVariant {
-                        location: location(15, 22),
+                        location: loc((1, 16), (1, 23)),
                         name: "Nothing".to_string(),
                         alias: None,
                         value: VariantValue::OnlyCtor,
                     },
                     EnumVariant {
-                        location: location(24, 33),
+                        location: loc((1, 25), (1, 34)),
                         name: "Just".to_string(),
                         alias: None,
                         value: VariantValue::PositionalCtor(vec![Type::Atomic(AtomicType::Int)]),
@@ -236,30 +257,30 @@ mod test {
     #[test]
     fn enum_with_polymorphic_variant() {
         let expr = dare::EnumParser::new()
-            .parse("enum Maybe<T> {Nothing, Just(T)}")
+            .parse(Lexer::new("enum Maybe<T> {Nothing, Just(T)}"))
             .unwrap();
 
         assert_eq!(
             expr,
             Enum {
-                location: location(0, 32),
+                location: loc((1, 1), (1, 33)),
                 name: "Maybe".to_string(),
                 type_parameters: vec!["T".to_string()],
                 variants: vec![
                     EnumVariant {
-                        location: location(15, 22),
+                        location: loc((1, 16), (1, 23)),
                         name: "Nothing".to_string(),
                         alias: None,
                         value: VariantValue::OnlyCtor,
                     },
                     EnumVariant {
-                        location: location(24, 31),
+                        location: loc((1, 25), (1, 32)),
                         name: "Just".to_string(),
                         alias: None,
                         value: VariantValue::PositionalCtor(vec![make_generic(
                             "T",
                             vec![],
-                            location(29, 30)
+                            loc((1, 30), (1, 31))
                         )]),
                     }
                 ],
@@ -270,15 +291,15 @@ mod test {
     #[test]
     fn type_alias_with_parameters() {
         let expr = dare::AliasParser::new()
-            .parse("type MyResult = Result<String, Int>")
+            .parse(Lexer::new("type MyResult = Result<String, Int>"))
             .unwrap();
         assert_eq!(
             expr,
             Alias {
-                location: location(0, 35),
+                location: loc((1, 1), (1, 36)),
                 name: "MyResult".to_string(),
                 alias: RefType {
-                    location: location(16, 35),
+                    location: loc((1, 17), (1, 36)),
                     name: "Result".to_string(),
                     type_parameters: vec![
                         Type::Atomic(AtomicType::Str),
@@ -291,7 +312,9 @@ mod test {
 
     #[test]
     fn list_with_atomic() {
-        let expr = dare::TypeParser::new().parse("List<Int>").unwrap();
+        let expr = dare::TypeParser::new()
+            .parse(Lexer::new("List<Int>"))
+            .unwrap();
         assert_eq!(
             expr,
             Type::Builtin(Builtin::List(Box::new(Type::Atomic(AtomicType::Int)))),
@@ -300,24 +323,28 @@ mod test {
 
     #[test]
     fn list_with_ref_type() {
-        let expr = dare::TypeParser::new().parse("List<Foo>").unwrap();
+        let expr = dare::TypeParser::new()
+            .parse(Lexer::new("List<Foo>"))
+            .unwrap();
         assert_eq!(
             expr,
             Type::Builtin(Builtin::List(Box::new(make_generic(
                 "Foo",
                 vec![],
-                location(5, 8)
+                loc((1, 6), (1, 9))
             )))),
         );
     }
 
     #[test]
     fn list_with_parameter() {
-        let expr = dare::TypeParser::new().parse("List<Foo<Int>>").unwrap();
+        let expr = dare::TypeParser::new()
+            .parse(Lexer::new("List<Foo<Int>>"))
+            .unwrap();
         assert_eq!(
             expr,
             Type::Builtin(Builtin::List(Box::new(Type::Reference(RefType {
-                location: location(5, 13),
+                location: loc((1, 6), (1, 14)),
                 name: "Foo".to_string(),
                 type_parameters: vec![Type::Atomic(AtomicType::Int)]
             })))),
@@ -326,35 +353,43 @@ mod test {
 
     #[test]
     fn optional_full() {
-        let expr_full = dare::TypeParser::new().parse("Optional<String>").unwrap();
+        let expr_full = dare::TypeParser::new()
+            .parse(Lexer::new("Optional<String>"))
+            .unwrap();
         let expected = Type::Builtin(Builtin::Optional(Box::new(Type::Atomic(AtomicType::Str))));
         assert_eq!(expr_full, expected);
     }
 
     #[test]
     fn optional_short() {
-        let expr_short = dare::TypeParser::new().parse("String ?").unwrap();
+        let expr_short = dare::TypeParser::new()
+            .parse(Lexer::new("String ?"))
+            .unwrap();
         let expected = Type::Builtin(Builtin::Optional(Box::new(Type::Atomic(AtomicType::Str))));
         assert_eq!(expr_short, expected);
     }
 
     #[test]
     fn optional_complex_type() {
-        let expr_short = dare::TypeParser::new().parse("Foo<Int>?").unwrap();
+        let expr_short = dare::TypeParser::new()
+            .parse(Lexer::new("Foo<Int>?"))
+            .unwrap();
         let expected = Type::Builtin(Builtin::Optional(Box::new(make_generic(
             "Foo",
             vec![Type::Atomic(AtomicType::Int)],
-            location(0, 8),
+            loc((1, 1), (1, 9)),
         ))));
         assert_eq!(expr_short, expected);
     }
 
     #[test]
     fn map_simple() {
-        let expr = dare::TypeParser::new().parse("Map<String, Foo>").unwrap();
+        let expr = dare::TypeParser::new()
+            .parse(Lexer::new("Map<String, Foo>"))
+            .unwrap();
         let expected = Type::Builtin(Builtin::Map(
             Box::new(Type::Atomic(AtomicType::Str)),
-            Box::new(make_generic("Foo", vec![], location(12, 15))),
+            Box::new(make_generic("Foo", vec![], loc((1, 13), (1, 16)))),
         ));
         assert_eq!(expr, expected)
     }
@@ -362,24 +397,24 @@ mod test {
     #[test]
     fn anon_struct_in_enum() {
         let expr = dare::EnumParser::new()
-            .parse("enum Foo {Stuff{f1: Int, f2: String}}")
+            .parse(Lexer::new("enum Foo {Stuff{f1: Int, f2: String}}"))
             .unwrap();
         let expected = Enum {
-            location: location(0, 37),
+            location: loc((1, 1), (1, 38)),
             name: "Foo".to_string(),
             type_parameters: vec![],
             variants: vec![EnumVariant {
-                location: location(10, 36),
+                location: loc((1, 11), (1, 37)),
                 name: "Stuff".to_string(),
                 alias: None,
                 value: VariantValue::StructCtor(vec![
                     Field {
-                        location: location(16, 23),
+                        location: loc((1, 17), (1, 24)),
                         name: "f1".to_string(),
                         typ: Type::Atomic(AtomicType::Int),
                     },
                     Field {
-                        location: location(25, 35),
+                        location: loc((1, 26), (1, 36)),
                         name: "f2".to_string(),
                         typ: Type::Atomic(AtomicType::Str),
                     },
@@ -387,6 +422,26 @@ mod test {
             }],
         };
         assert_eq!(expr, expected)
+    }
+
+    #[test]
+    fn sum_with_alias() {
+        let expr = dare::EnumParser::new()
+                .parse(Lexer::new(r#"enum TestEnum {Simple1 as "one"}"#))
+                .unwrap();
+        let expected = Enum {
+            location: loc((1,1), (1,33)),
+            name: "TestEnum".to_string(),
+            type_parameters: vec![],
+            variants: vec![EnumVariant{
+                location: loc((1,16), (1,32)),
+                name: "Simple1".to_string(),
+                alias: Some("one".to_string()),
+                value: VariantValue::OnlyCtor,
+            }],
+        };
+
+        assert_eq!(expr, expected);
     }
 
     fn make_generic(name: &str, params: Vec<Type<String>>, loc: SrcSpan) -> Type<String> {

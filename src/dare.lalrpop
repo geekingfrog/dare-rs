@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use crate::lexer;
 use crate::ast::{
   Struct,
   Enum,
@@ -79,13 +80,13 @@ pub Type: Type<String> = {
   // ditch the anon structs for use in list List<{...}> (at least for now)
   // "{" <fields:Comma<Field>> "}" => Type::Anonymous(fields),
 
-  "List<" <typ:Type> ">" => Type::Builtin(Builtin::List(Box::new(typ))),
+  "List" "<" <typ:Type> ">" => Type::Builtin(Builtin::List(Box::new(typ))),
   "[" <typ:Type> "]" => Type::Builtin(Builtin::List(Box::new(typ))),
 
-  "Optional<" <typ:Type> ">" => Type::Builtin(Builtin::Optional(Box::new(typ))),
+  "Optional" "<" <typ:Type> ">" => Type::Builtin(Builtin::Optional(Box::new(typ))),
   <typ:Type>"?" => Type::Builtin(Builtin::Optional(Box::new(typ))),
 
-  "Map<" <key:Type> "," <val:Type> ">" => Type::Builtin(Builtin::Map(
+  "Map" "<" <key:Type> "," <val:Type> ">" => Type::Builtin(Builtin::Map(
     Box::new(key),
     Box::new(val),
   )),
@@ -150,36 +151,80 @@ Comma<T>: Vec<T> = {
     }
 };
 
-quoted_word: String = <w:quoted_word_r> => w[1..w.len()-1].to_string();
+// quoted_word: String = <w:quoted_word_r> => w[1..w.len()-1].to_string();
 
-match {
-  "as",
-  "struct",
-  "enum",
-  "type",
-  "List",
-  "Map",
-  "Optional",
-  "String",
-  "UInt",
-  "Int",
-  "Int8",
-  "Int16",
-  "Int32",
-  "Int64",
-  "UInt8",
-  "UInt16",
-  "UInt32",
-  "UInt64",
-  "Float",
-  "Bool",
-  "Bytes",
-} else {
-  r#""[^"]*""# => quoted_word_r,
-} else {
-  r"[A-Z]\w*" => Word,
-} else {
-  r"[a-z]\w*" => word,
-  _,
+// match {
+//   "as",
+//   "struct",
+//   "enum",
+//   "type",
+//   "List",
+//   "Map",
+//   "Optional",
+//   "String",
+//   "UInt",
+//   "Int",
+//   "Int8",
+//   "Int16",
+//   "Int32",
+//   "Int64",
+//   "UInt8",
+//   "UInt16",
+//   "UInt32",
+//   "UInt64",
+//   "Float",
+//   "Bool",
+//   "Bytes",
+// } else {
+//   r#""[^"]*""# => quoted_word_r,
+// } else {
+//   r"[A-Z]\w*" => Word,
+// } else {
+//   r"[a-z]\w*" => word,
+//   _,
+// }
+
+extern {
+  type Location = lexer::Loc;
+  type Error = lexer::LexicalError;
+
+  enum lexer::Tok {
+    "("               => lexer::Tok::OpenParens,
+    ")"               => lexer::Tok::CloseParens,
+    "{"               => lexer::Tok::OpenBrace,
+    "}"               => lexer::Tok::CloseBrace,
+    "["               => lexer::Tok::OpenBracket,
+    "]"               => lexer::Tok::CloseBracket,
+    "<"               => lexer::Tok::LesserThan,
+    ">"               => lexer::Tok::GreaterThan,
+    ","               => lexer::Tok::Comma,
+    "?"               => lexer::Tok::QuestionMark,
+    "="               => lexer::Tok::Equal,
+    ":"               => lexer::Tok::Column,
+    // "\n"              => lexer::Tok::Newline,
+    "struct"          => lexer::Tok::Keyword(lexer::Keyword::Struct),
+    "enum"            => lexer::Tok::Keyword(lexer::Keyword::Enum),
+    "type"            => lexer::Tok::Keyword(lexer::Keyword::Type),
+    "List"            => lexer::Tok::Keyword(lexer::Keyword::List),
+    "Map"             => lexer::Tok::Keyword(lexer::Keyword::Map),
+    "Optional"        => lexer::Tok::Keyword(lexer::Keyword::Optional),
+    "String"          => lexer::Tok::Keyword(lexer::Keyword::Str),
+    "UInt"            => lexer::Tok::Keyword(lexer::Keyword::UInt),
+    "Int"             => lexer::Tok::Keyword(lexer::Keyword::Int),
+    "Int8"            => lexer::Tok::Keyword(lexer::Keyword::Int8),
+    "Int16"           => lexer::Tok::Keyword(lexer::Keyword::Int16),
+    "Int32"           => lexer::Tok::Keyword(lexer::Keyword::Int32),
+    "Int64"           => lexer::Tok::Keyword(lexer::Keyword::Int64),
+    "UInt8"           => lexer::Tok::Keyword(lexer::Keyword::UInt8),
+    "UInt16"          => lexer::Tok::Keyword(lexer::Keyword::UInt16),
+    "UInt32"          => lexer::Tok::Keyword(lexer::Keyword::UInt32),
+    "UInt64"          => lexer::Tok::Keyword(lexer::Keyword::UInt64),
+    "Float"           => lexer::Tok::Keyword(lexer::Keyword::Float),
+    "Bool"            => lexer::Tok::Keyword(lexer::Keyword::Bool),
+    "Bytes"           => lexer::Tok::Keyword(lexer::Keyword::Bytes),
+    "as"              => lexer::Tok::Keyword(lexer::Keyword::As),
+    quoted_word       => lexer::Tok::Str(<String>),
+    Word              => lexer::Tok::CapitalizedLabel(<String>),
+    word              => lexer::Tok::Label(<String>),
+  }
 }
-

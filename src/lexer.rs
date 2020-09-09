@@ -3,7 +3,7 @@ use std::{fmt::Display, iter::Peekable, str::Chars};
 // used in tests to enumerate all variants of enums
 use strum::IntoEnumIterator;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Display)]
 pub enum Tok {
     OpenParens,
     CloseParens,
@@ -15,7 +15,8 @@ pub enum Tok {
     GreaterThan,
     Comma,
     QuestionMark,
-    Newline,
+    Equal,
+    Column,
     // Skipped(char),
     Keyword(Keyword),
     Str(String),
@@ -35,12 +36,13 @@ fn lookup_atomic_token(c: &char) -> Option<Tok> {
         '>' => Some(Tok::GreaterThan),
         ',' => Some(Tok::Comma),
         '?' => Some(Tok::QuestionMark),
-        '\n' => Some(Tok::Newline),
+        '=' => Some(Tok::Equal),
+        ':' => Some(Tok::Column),
         _ => None,
     }
 }
 
-#[derive(Debug, PartialEq, Eq, EnumIter)]
+#[derive(Debug, PartialEq, Eq, Clone, EnumIter)]
 pub enum Keyword {
     Enum,
     Struct,
@@ -88,7 +90,7 @@ impl Display for Keyword {
             Keyword::Float => f.write_str("Float"),
             Keyword::Bool => f.write_str("Bool"),
             Keyword::Bytes => f.write_str("Bytes"),
-            Keyword::As => f.write_str("As"),
+            Keyword::As => f.write_str("as"),
         }
     }
 }
@@ -115,14 +117,14 @@ fn lookup_keyword(raw: &str) -> Option<Keyword> {
         "Float" => Some(Keyword::Float),
         "Bool" => Some(Keyword::Bool),
         "Bytes" => Some(Keyword::Bytes),
-        "As" => Some(Keyword::As),
+        "as" => Some(Keyword::As),
         _ => None,
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Display)]
 pub enum LexicalError {
-    UnexpectedEOF,
+    UnexpectedChar(char, Loc, Loc),
     UnterminatedString(Loc, Loc),
 }
 
@@ -130,8 +132,8 @@ pub type Spanned<Tok, Loc, Error> = Result<(Loc, Tok, Loc), Error>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Loc {
-    line: usize,
-    column: usize,
+    pub line: usize,
+    pub column: usize,
 }
 
 impl Loc {
@@ -151,6 +153,18 @@ impl Loc {
     }
 }
 
+impl Default for Loc {
+    fn default() -> Self {
+        Loc { line: 1, column: 1 }
+    }
+}
+
+impl Display for Loc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Loc{{line: {}, column: {}}}", self.line, self.column)
+    }
+}
+
 pub struct Lexer<'input> {
     chars: Peekable<Chars<'input>>,
     current_loc: Loc,
@@ -166,18 +180,6 @@ impl<'input> Lexer<'input> {
 
     pub fn run(&mut self) -> Vec<Spanned<Tok, Loc, LexicalError>> {
         self.into_iter().collect()
-    }
-
-    // pub fn scan(&mut self) -> Box<dyn Iterator<Item=Spanned<Tok, Loc, LexicalError>>> {
-    //     Box::new(self.into_iter())
-    // }
-
-    fn do_stuff(&mut self) -> Option<usize> {
-        todo!()
-    }
-
-    fn parse_word(&mut self) -> Result<String, LexicalError> {
-        todo!()
     }
 
     /// consume one character from the input stream, returns it
@@ -209,6 +211,7 @@ impl<'input> Iterator for Lexer<'input> {
                         return Some(Ok((start_loc, tok, self.current_loc)));
                     }
                     if c == '"' {
+                        // quoted strings "foo bared"
                         let mut chars: Vec<char> = Vec::new();
                         loop {
                             match self.advance() {
@@ -237,47 +240,49 @@ impl<'input> Iterator for Lexer<'input> {
                         }
                     }
 
+                    if c == '/' {
+                        // perhaps the beginning of a comment
+                        match self.chars.peek() {
+                            Some('/') => {
+                                while let Some(c) = self.advance() {
+                                    if c == '\n' {
+                                        break;
+                                    }
+                                }
+                            }
+                            _ => {
+                                return Some(Err(LexicalError::UnexpectedChar(
+                                    '/',
+                                    start_loc,
+                                    self.current_loc,
+                                )))
+                            }
+                        }
+                    }
+
                     // output a label
                     if c.is_ascii_alphabetic() {
                         let is_uppercase_word = c.is_uppercase();
                         let mut chars: Vec<char> = vec![c];
                         loop {
-                            match self.advance() {
-                                Some(c) if c.is_ascii_alphanumeric() => chars.push(c),
-                                Some(c) if c == ' ' => {
-                                    let label: String = chars.into_iter().collect();
-                                    let token = match lookup_keyword(&label) {
-                                        Some(kw) => Tok::Keyword(kw),
-                                        None => {
-                                            if is_uppercase_word {
-                                                Tok::CapitalizedLabel(label)
-                                            } else {
-                                                Tok::Label(label)
-                                            }
-                                        }
-                                    };
-                                    return Some(Ok((start_loc, token, self.current_loc)));
-                                }
-                                None => {
-                                    // copy pasted from the previous block
-                                    let label: String = chars.into_iter().collect();
-                                    let token = match lookup_keyword(&label) {
-                                        Some(kw) => Tok::Keyword(kw),
-                                        None => {
-                                            if is_uppercase_word {
-                                                Tok::CapitalizedLabel(label)
-                                            } else {
-                                                Tok::Label(label)
-                                            }
-                                        }
-                                    };
-                                    return Some(Ok((start_loc, token, self.current_loc)));
+                            match self.chars.peek() {
+                                Some(c) if c.is_ascii_alphanumeric() => {
+                                    chars.push(*c);
+                                    self.advance();
                                 }
                                 _ => {
-                                    return Some(Err(LexicalError::UnterminatedString(
-                                        start_loc,
-                                        self.current_loc,
-                                    )))
+                                    let label: String = chars.into_iter().collect();
+                                    let token = match lookup_keyword(&label) {
+                                        Some(kw) => Tok::Keyword(kw),
+                                        None => {
+                                            if is_uppercase_word {
+                                                Tok::CapitalizedLabel(label)
+                                            } else {
+                                                Tok::Label(label)
+                                            }
+                                        }
+                                    };
+                                    return Some(Ok((start_loc, token, self.current_loc)));
                                 }
                             }
                         }
@@ -285,7 +290,6 @@ impl<'input> Iterator for Lexer<'input> {
                     // skip the token
                     start_loc = self.current_loc;
                     continue;
-                    // return Some(Ok((start_loc, Tok::Skipped(c), self.current_loc)));
                 }
                 None => return None, // EOF
             }
@@ -360,6 +364,51 @@ mod test {
             Ok(Tok::Keyword(Keyword::Enum)),
             Ok(Tok::OpenBrace),
             Ok(Tok::CloseBrace),
+        ];
+        assert_eq!(tokens, expected);
+    }
+
+    #[test]
+    fn test_capitalized_word() {
+        let tokens = Lexer::new("Foo<T1>")
+            .run()
+            .into_iter()
+            .map(|r| r.map(|(_, tok, _)| tok))
+            .collect::<Vec<_>>();
+        let expected = vec![
+            Ok(Tok::CapitalizedLabel(String::from("Foo"))),
+            Ok(Tok::LesserThan),
+            Ok(Tok::CapitalizedLabel(String::from("T1"))),
+            Ok(Tok::GreaterThan),
+        ];
+        assert_eq!(tokens, expected);
+    }
+
+    #[test]
+    fn test_ignore_comment() {
+        let tokens = Lexer::new("Foo // hello stuff\nBar")
+            .run()
+            .into_iter()
+            .map(|r| r.map(|(_, tok, _)| tok))
+            .collect::<Vec<_>>();
+        let expected = vec![
+            Ok(Tok::CapitalizedLabel(String::from("Foo"))),
+            Ok(Tok::CapitalizedLabel(String::from("Bar"))),
+        ];
+        assert_eq!(tokens, expected);
+    }
+
+    #[test]
+    fn test_as() {
+        let tokens = Lexer::new(r#"Foo as "aliased""#)
+            .run()
+            .into_iter()
+            .map(|r| r.map(|(_, tok, _)| tok))
+            .collect::<Vec<_>>();
+        let expected = vec![
+            Ok(Tok::CapitalizedLabel(String::from("Foo"))),
+            Ok(Tok::Keyword(Keyword::As)),
+            Ok(Tok::Str(String::from("aliased"))),
         ];
         assert_eq!(tokens, expected);
     }
