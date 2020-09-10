@@ -17,7 +17,7 @@ pub enum Tok {
     QuestionMark,
     Equal,
     Column,
-    // Skipped(char),
+    Pound,
     Keyword(Keyword),
     Str(String),
     CapitalizedLabel(String),
@@ -38,6 +38,7 @@ fn lookup_atomic_token(c: &char) -> Option<Tok> {
         '?' => Some(Tok::QuestionMark),
         '=' => Some(Tok::Equal),
         ':' => Some(Tok::Column),
+        '#' => Some(Tok::Pound),
         _ => None,
     }
 }
@@ -122,14 +123,6 @@ fn lookup_keyword(raw: &str) -> Option<Keyword> {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Display)]
-pub enum LexicalError {
-    UnexpectedChar(char, Loc, Loc),
-    UnterminatedString(Loc, Loc),
-}
-
-pub type Spanned<Tok, Loc, Error> = Result<(Loc, Tok, Loc), Error>;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Loc {
     pub line: usize,
@@ -164,6 +157,25 @@ impl Display for Loc {
         write!(f, "Loc{{line: {}, column: {}}}", self.line, self.column)
     }
 }
+
+#[derive(Debug, PartialEq, Eq, Default, Clone, Copy)]
+pub struct SrcSpan {
+    pub start: Loc,
+    pub end: Loc,
+}
+
+pub fn location(start: Loc, end: Loc) -> SrcSpan {
+    SrcSpan { start, end }
+}
+
+#[derive(Debug, PartialEq, Eq, Display)]
+pub enum LexicalError {
+    UnexpectedChar(char, Loc, Loc),
+    UnterminatedString(Loc, Loc),
+    ParseError(Loc, Loc, String),
+}
+
+pub type Spanned<Tok, Loc, Error> = Result<(Loc, Tok, Loc), Error>;
 
 pub struct Lexer<'input> {
     chars: Peekable<Chars<'input>>,

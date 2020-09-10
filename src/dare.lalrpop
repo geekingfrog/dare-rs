@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::lexer;
+use crate::lexer::{self, location};
 use crate::ast::{
   Struct,
   Enum,
@@ -13,8 +13,12 @@ use crate::ast::{
   TopDeclaration,
   Alias,
   Builtin,
-  location,
+  Directives,
+  DirectiveArg,
+  JsonDirective,
+  JsonRepr,
 };
+use lalrpop_util::ParseError;
 
 grammar;
 
@@ -37,11 +41,13 @@ pub Struct: Struct<String> = {
 }
 
 pub Enum: Enum<String> = {
+  <directives:Directives?>
   <s:@L> "enum" <name:Word> <params: TopLevelParams> "{" <variants:Comma<EnumVariant>> "}" <e:@L> => Enum {
     location: location(s, e),
     name: name.to_string(),
     type_parameters: params,
     variants,
+    directives: directives.unwrap_or_default(),
   }
 }
 
@@ -121,6 +127,22 @@ VariantValue: VariantValue<String> = {
   }
 }
 
+pub Directives: Directives = {
+  <s:@L> "#" "[" <dir_type:word> "(" <args: Comma<DirectiveArg>> ")" "]" <e:@L> =>? {
+    Directives::parse(s, e, dir_type, args)
+      .map_err(|e| ParseError::User {error: e})
+  }
+}
+
+DirectiveArg: DirectiveArg = {
+  <s:@L> <k:word> "=" <v:quoted_word> <e:@L> => DirectiveArg {
+    start: s,
+    end: e,
+    key: k,
+    value: v,
+  }
+}
+
 
 pub AtomicType: AtomicType = {
   "String" => AtomicType::Str,
@@ -151,39 +173,6 @@ Comma<T>: Vec<T> = {
     }
 };
 
-// quoted_word: String = <w:quoted_word_r> => w[1..w.len()-1].to_string();
-
-// match {
-//   "as",
-//   "struct",
-//   "enum",
-//   "type",
-//   "List",
-//   "Map",
-//   "Optional",
-//   "String",
-//   "UInt",
-//   "Int",
-//   "Int8",
-//   "Int16",
-//   "Int32",
-//   "Int64",
-//   "UInt8",
-//   "UInt16",
-//   "UInt32",
-//   "UInt64",
-//   "Float",
-//   "Bool",
-//   "Bytes",
-// } else {
-//   r#""[^"]*""# => quoted_word_r,
-// } else {
-//   r"[A-Z]\w*" => Word,
-// } else {
-//   r"[a-z]\w*" => word,
-//   _,
-// }
-
 extern {
   type Location = lexer::Loc;
   type Error = lexer::LexicalError;
@@ -201,7 +190,7 @@ extern {
     "?"               => lexer::Tok::QuestionMark,
     "="               => lexer::Tok::Equal,
     ":"               => lexer::Tok::Column,
-    // "\n"              => lexer::Tok::Newline,
+    "#"               => lexer::Tok::Pound,
     "struct"          => lexer::Tok::Keyword(lexer::Keyword::Struct),
     "enum"            => lexer::Tok::Keyword(lexer::Keyword::Enum),
     "type"            => lexer::Tok::Keyword(lexer::Keyword::Type),

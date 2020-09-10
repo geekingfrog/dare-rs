@@ -65,9 +65,10 @@ fn parse(f: &File) -> Result<Vec<ast::TopDeclaration<String>>> {
 mod test {
     use super::*;
     use ast::{
-        Alias, AtomicType, Builtin, Enum, EnumVariant, Field, RefType, SrcSpan, Struct,
-        Type, VariantValue,
+        Alias, AtomicType, Builtin, Directives, Enum, EnumVariant, Field, JsonDirective, JsonRepr,
+        RefType, Struct, Type, VariantValue,
     };
+    use lexer::{Loc, SrcSpan};
     use pretty_assertions::assert_eq;
 
     fn loc(s: (usize, usize), e: (usize, usize)) -> SrcSpan {
@@ -220,6 +221,7 @@ mod test {
                         value: VariantValue::OnlyCtor,
                     }
                 ],
+                directives: Directives::default(),
             }
         )
     }
@@ -250,6 +252,7 @@ mod test {
                         value: VariantValue::PositionalCtor(vec![Type::Atomic(AtomicType::Int)]),
                     }
                 ],
+                directives: Directives::default(),
             }
         )
     }
@@ -284,6 +287,7 @@ mod test {
                         )]),
                     }
                 ],
+                directives: Directives::default(),
             }
         )
     }
@@ -420,6 +424,7 @@ mod test {
                     },
                 ]),
             }],
+            directives: Directives::default(),
         };
         assert_eq!(expr, expected)
     }
@@ -427,18 +432,44 @@ mod test {
     #[test]
     fn sum_with_alias() {
         let expr = dare::EnumParser::new()
-                .parse(Lexer::new(r#"enum TestEnum {Simple1 as "one"}"#))
-                .unwrap();
+            .parse(Lexer::new(r#"enum TestEnum {Simple1 as "one"}"#))
+            .unwrap();
         let expected = Enum {
-            location: loc((1,1), (1,33)),
+            location: loc((1, 1), (1, 33)),
             name: "TestEnum".to_string(),
             type_parameters: vec![],
-            variants: vec![EnumVariant{
-                location: loc((1,16), (1,32)),
+            variants: vec![EnumVariant {
+                location: loc((1, 16), (1, 32)),
                 name: "Simple1".to_string(),
                 alias: Some("one".to_string()),
                 value: VariantValue::OnlyCtor,
             }],
+            directives: Directives::default(),
+        };
+
+        assert_eq!(expr, expected);
+    }
+
+    #[test]
+    fn test_json_directive() {
+        let expr = dare::EnumParser::new()
+            .parse(Lexer::new(r#"#[json(tag="customTag", content="customContent", repr = "tuple")] enum TestEnum {}"#))
+            .unwrap();
+        let expected = Enum {
+            location: loc((1, 67), (1, 83)),
+            name: "TestEnum".to_string(),
+            type_parameters: vec![],
+            variants: vec![],
+            directives: Directives {
+                json: Some((
+                    loc((1, 1), (1, 66)),
+                    JsonDirective {
+                        repr: JsonRepr::Tuple,
+                        tag: "customTag".to_string(),
+                        content: "customContent".to_string(),
+                    },
+                )),
+            },
         };
 
         assert_eq!(expr, expected);

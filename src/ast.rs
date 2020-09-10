@@ -1,7 +1,7 @@
+use crate::lexer::{self, LexicalError, Loc, SrcSpan};
 use anyhow::Result;
-use std::fmt::Debug;
 use std::{collections::BTreeMap, vec::Vec};
-use crate::lexer;
+use std::{convert::TryFrom, fmt::Debug};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum TopDeclaration<Reference> {
@@ -59,6 +59,7 @@ pub struct Enum<Reference> {
     // only generic types are allowed in definition
     pub type_parameters: Vec<String>,
     pub variants: Vec<EnumVariant<Reference>>,
+    pub directives: Directives,
 }
 
 impl<T> Enum<T> {
@@ -159,14 +160,129 @@ pub enum Builtin<Reference> {
     Map(Box<Type<Reference>>, Box<Type<Reference>>),
 }
 
-#[derive(Debug, PartialEq, Eq, Default, Clone, Copy)]
-pub struct SrcSpan {
-    pub start: lexer::Loc,
-    pub end: lexer::Loc,
+// #[derive(Debug, PartialEq, Eq, Default, Clone, Copy)]
+// pub struct SrcSpan {
+//     pub start: lexer::Loc,
+//     pub end: lexer::Loc,
+// }
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct JsonDirective {
+    pub repr: JsonRepr,
+    pub tag: String,
+    pub content: String,
 }
 
-pub fn location(start: lexer::Loc, end: lexer::Loc) -> SrcSpan {
-    SrcSpan { start, end }
+impl Default for JsonDirective {
+    fn default() -> Self {
+        JsonDirective {
+            repr: JsonRepr::default(),
+            tag: "tag".to_string(),
+            content: "contents".to_string(),
+        }
+    }
+}
+
+impl JsonDirective {
+    fn parse(args: Vec<DirectiveArg>) -> Result<Self, LexicalError> {
+        let mut result = JsonDirective::default();
+
+        for arg in args {
+            if arg.key == "repr" {
+                match JsonRepr::try_from(arg.value) {
+                    Ok(r) => result.repr = r,
+                    Err(err) => return Err(LexicalError::ParseError(arg.start, arg.end, err)),
+                }
+            } else if arg.key == "tag" {
+                if arg.value.is_empty() {
+                    return Err(LexicalError::ParseError(
+                        arg.start,
+                        arg.end,
+                        "tag cannot be empty".to_string(),
+                    ));
+                }
+                result.tag = arg.value;
+            } else if arg.key == "content" {
+                if arg.value.is_empty() {
+                    return Err(LexicalError::ParseError(
+                        arg.start,
+                        arg.end,
+                        "content cannot be empty".to_string(),
+                    ));
+                }
+                result.content = arg.value;
+            } else {
+                return Err(LexicalError::ParseError(
+                    arg.start,
+                    arg.end,
+                    format!("Unknown json directive: {}", arg.key),
+                ));
+            }
+        }
+
+        Ok(result)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum JsonRepr {
+    Nested,
+    Tuple,
+    // Flat,
+    // Union,
+}
+
+impl Default for JsonRepr {
+    fn default() -> Self {
+        JsonRepr::Nested
+    }
+}
+
+impl TryFrom<String> for JsonRepr {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value == "nested" {
+            Ok(JsonRepr::Nested)
+        } else if value == "tuple" {
+            Ok(JsonRepr::Tuple)
+        } else {
+            Err(format!("Unknown json directive argument: {}", value))
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Default)]
+pub struct Directives {
+    pub json: Option<(SrcSpan, JsonDirective)>,
+}
+
+impl Directives {
+    pub(crate) fn parse(
+        s: Loc,
+        e: Loc,
+        dir_type: String,
+        args: Vec<DirectiveArg>,
+    ) -> Result<Self, LexicalError> {
+        if dir_type == "json" {
+            JsonDirective::parse(args).map(|json| Directives {
+                json: Some((SrcSpan { start: s, end: e }, json)),
+            })
+        } else {
+            Err(LexicalError::ParseError(
+                s,
+                e,
+                format!("Unknown directive: {}", dir_type),
+            ))
+        }
+    }
+}
+
+pub struct DirectiveArg {
+    pub start: Loc,
+    pub end: Loc,
+    pub key: String,
+    pub value: String,
 }
 
 type Mappings = BTreeMap<String, usize>;
@@ -227,6 +343,7 @@ fn validate_enum(mappings: &Mappings, e: Enum<String>) -> Result<Enum<usize>> {
         name: e.name,
         type_parameters: e.type_parameters,
         variants: variants?,
+        directives: Directives::default(),
     })
 }
 
