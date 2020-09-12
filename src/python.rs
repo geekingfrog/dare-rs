@@ -1,7 +1,6 @@
 use crate::ast;
 use crate::ast::{
-    Alias, AtomicType, Builtin, Enum, ResolvedReference, Struct, TopDeclaration, Type,
-    VariantValue,
+    Alias, AtomicType, Builtin, Enum, ResolvedReference, Struct, TopDeclaration, Type, VariantValue,
 };
 use inflections::Inflect;
 use std::collections::{BTreeMap, BTreeSet};
@@ -537,7 +536,7 @@ fn gen_simple_enum(e: &Enum<ResolvedReference>) -> PyToken {
 fn gen_py_sum_type(mut gen_ctx: &mut GenCtx, e: &Enum<ResolvedReference>) -> PyToken {
     let mut tokens = vec![];
     for variant in &e.variants {
-        tokens.push(gen_enum_variant(&mut gen_ctx, &variant));
+        tokens.push(gen_enum_variant(&mut gen_ctx, &variant, &e.directives));
         tokens.push(PyToken::NewLine);
     }
 
@@ -568,9 +567,19 @@ fn gen_py_sum_type(mut gen_ctx: &mut GenCtx, e: &Enum<ResolvedReference>) -> PyT
         )
         .into(),
     );
-    from_json_body.push(r#"tag = data.get("tag")"#.into());
+
+    let json_directive = e
+        .directives
+        .json
+        .as_ref()
+        .map(|x| x.1.clone())
+        .unwrap_or_default();
+    let tag_name = json_directive.tag;
+    let content_name = json_directive.content;
+
+    from_json_body.push(format!(r#"tag = data.get("{}")"#, tag_name).into());
     from_json_body.push(PyToken::NewLine);
-    from_json_body.push(r#"contents = data.get("contents")"#.into());
+    from_json_body.push(format!(r#"contents = data.get("{}")"#, content_name).into());
     from_json_body.push(PyToken::NewLine);
 
     for variant in &e.variants {
@@ -623,8 +632,9 @@ fn gen_py_sum_type(mut gen_ctx: &mut GenCtx, e: &Enum<ResolvedReference>) -> PyT
 }
 
 fn gen_enum_variant(
-    gen_ctx: &mut GenCtx,
+    mut gen_ctx: &mut GenCtx,
     variant: &ast::EnumVariant<ResolvedReference>,
+    directives: &ast::Directives,
 ) -> PyToken {
     let mut tokens = Vec::new();
     let dataclass = PyToken::Import(
@@ -634,54 +644,20 @@ fn gen_enum_variant(
 
     tokens.push(PyToken::NewLine);
 
-    let mut td_class_body = vec![typed_attr(
-        "tag",
-        vec![
-            type_import("Literal"),
-            format!(r#"["{}"]"#, variant.name).into(),
-        ],
-        None,
-    )];
-
-    let td_name = format!("{}TypedDict", variant.name.to_pascal_case());
-
-    match &variant.value {
-        VariantValue::OnlyCtor => (),
-        VariantValue::PositionalCtor(refs) => {
-            td_class_body.push(PyToken::NewLine);
-            if refs.len() == 1 {
-                td_class_body.push(typed_attr(
-                    "contents",
-                    vec![refs[0].get_json_type(&gen_ctx).into()],
-                    // vec![refs[0].to_py_token(&gen_ctx)],
-                    None,
-                ));
-            } else {
-                let mut typs = vec![type_import("Tuple")];
-                typs.push("[".into());
-                typs.extend(intersperce(
-                    ", ".into(),
-                    refs.iter()
-                        .map(|t| t.get_json_type(&gen_ctx).into())
-                        .collect(),
-                ));
-                typs.push("]".into());
-                td_class_body.push(typed_attr("contents", typs, None));
-            }
-        }
-        VariantValue::StructCtor(_) => todo!("anon struct in sum type"),
-    }
-
-    tokens.extend(py_class(
-        &td_name,
-        vec![type_import("TypedDict")],
-        td_class_body,
-    ));
+    let (td_name, json_type) = gen_enum_variant_json_type(&mut gen_ctx, variant, directives);
+    tokens.push(json_type);
 
     tokens.push(PyToken::NewLine);
     tokens.push(PyToken::NewLine);
 
     let mut class_body = vec![];
+    let json_directive = directives
+        .json
+        .as_ref()
+        .map(|x| x.1.clone())
+        .unwrap_or_default();
+    let tag_name = json_directive.tag;
+    let content_name = json_directive.content;
 
     match &variant.value {
         VariantValue::OnlyCtor => {
@@ -689,7 +665,7 @@ fn gen_enum_variant(
             class_body.extend(py_fn(
                 "to_json",
                 vec!["self".into()],
-                vec![format!(r#"return {{"tag": "{}"}}"#, tag_val).into()],
+                vec![format!(r#"return {{"{}": "{}"}}"#, tag_name, tag_val).into()],
                 Some("Any".into()),
             ));
         }
@@ -722,8 +698,10 @@ fn gen_enum_variant(
                     "to_json",
                     vec!["self".into()],
                     vec![format!(
-                        r#"return {{"tag": "{}", "contents": {}}}"#,
+                        r#"return {{"{}": "{}", "{}": {}}}"#,
+                        tag_name,
                         variant.name.to_pascal_case(),
+                        content_name,
                         get_dump_function(&gen_ctx, &refs[0], "self.inner", 0)
                             .unwrap_or("self.inner".to_owned())
                     )
@@ -786,8 +764,10 @@ fn gen_enum_variant(
                     vec!["self".into()],
                     vec![
                         format!(
-                            r#"return {{"tag": "{}", "contents": ("#,
+                            r#"return {{"{}": "{}", "{}": ("#,
+                            tag_name,
                             variant.name.to_pascal_case(),
+                            content_name,
                         )
                         .into(),
                         PyToken::Block(to_json_contents),
@@ -808,13 +788,83 @@ fn gen_enum_variant(
     PyToken::Block(tokens)
 }
 
-// /// We may need to summon a new name from the given constructor
-// fn gen_variant_name(variant: &ast::EnumVariant) -> String {
-//     match &variant.value {
-//         VariantValue::StructCtor(_) => format!("{}Struct", variant.name),
-//         _ => variant.name.to_owned(),
-//     }
-// }
+/// name and tokens to describe the return type of .to_json()
+fn gen_enum_variant_json_type(
+    mut gen_ctx: &mut GenCtx,
+    variant: &ast::EnumVariant<ResolvedReference>,
+    directives: &ast::Directives,
+) -> (String, PyToken) {
+    let x = directives.json.as_ref().map(|x| x.1.repr);
+    let repr = x.unwrap_or_default();
+    match repr {
+        ast::JsonRepr::Nested => gen_enum_variant_typedict(&gen_ctx, &variant, directives),
+        ast::JsonRepr::Tuple => gen_enum_variant_tuple(&gen_ctx, &variant, directives),
+    }
+}
+
+fn gen_enum_variant_typedict(
+    gen_ctx: &GenCtx,
+    variant: &ast::EnumVariant<ResolvedReference>,
+    directives: &ast::Directives,
+) -> (String, PyToken) {
+    let tag_name = directives
+        .json
+        .as_ref()
+        .map_or_else(|| ast::JsonDirective::default().tag, |(_, x)| x.tag.clone());
+    let content_name = directives.json.as_ref().map_or_else(
+        || ast::JsonDirective::default().content,
+        |(_, x)| x.content.clone(),
+    );
+
+    let mut td_class_body = vec![typed_attr(
+        &tag_name,
+        vec![
+            type_import("Literal"),
+            format!(r#"["{}"]"#, variant.name).into(),
+        ],
+        None,
+    )];
+
+    let td_name = format!("{}TypedDict", variant.name.to_pascal_case());
+
+    match &variant.value {
+        VariantValue::OnlyCtor => (),
+        VariantValue::PositionalCtor(refs) => {
+            td_class_body.push(PyToken::NewLine);
+            if refs.len() == 1 {
+                td_class_body.push(typed_attr(
+                    &content_name,
+                    vec![refs[0].get_json_type(&gen_ctx).into()],
+                    None,
+                ));
+            } else {
+                let mut typs = vec![type_import("Tuple")];
+                typs.push("[".into());
+                typs.extend(intersperce(
+                    ", ".into(),
+                    refs.iter()
+                        .map(|t| t.get_json_type(&gen_ctx).into())
+                        .collect(),
+                ));
+                typs.push("]".into());
+                td_class_body.push(typed_attr(&content_name, typs, None));
+            }
+        }
+        VariantValue::StructCtor(_) => todo!("anon struct in sum type"),
+    }
+
+    let tokens = py_class(&td_name, vec![type_import("TypedDict")], td_class_body);
+
+    (td_name, PyToken::Block(tokens))
+}
+
+fn gen_enum_variant_tuple(
+    gen_ctx: &GenCtx,
+    variant: &ast::EnumVariant<ResolvedReference>,
+    directives: &ast::Directives,
+) -> (String, PyToken) {
+    todo!()
+}
 
 fn gen_type_vars(n: u8) -> PyToken {
     let mut tokens = vec![];

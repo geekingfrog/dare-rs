@@ -6,7 +6,7 @@
 import json
 import pytest
 from operator import itemgetter
-from dare import atomic_struct, simple_enum, simple_sum, references
+from dare import atomic_struct, simple_enum, simple_sum, references, json_directives
 from typing import Any, List, Tuple, TypedDict, cast
 
 
@@ -52,6 +52,7 @@ def gather_tests(specs_and_modules: List[Tuple[str, Any]]) -> List[TestSpec]:
             ("../simple_enum_spec.json", simple_enum),
             ("../simple_sum_spec.json", simple_sum),
             ("../references_spec.json", references),
+            ("../json_directives_spec.json", json_directives),
         ]
     ),
     ids=itemgetter("description"),

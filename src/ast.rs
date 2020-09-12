@@ -166,7 +166,7 @@ pub enum Builtin<Reference> {
 //     pub end: lexer::Loc,
 // }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct JsonDirective {
     pub repr: JsonRepr,
     pub tag: String,
@@ -224,7 +224,7 @@ impl JsonDirective {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum JsonRepr {
     Nested,
     Tuple,
@@ -278,6 +278,7 @@ impl Directives {
     }
 }
 
+#[derive(Debug)]
 pub struct DirectiveArg {
     pub start: Loc,
     pub end: Loc,
@@ -343,7 +344,7 @@ fn validate_enum(mappings: &Mappings, e: Enum<String>) -> Result<Enum<usize>> {
         name: e.name,
         type_parameters: e.type_parameters,
         variants: variants?,
-        directives: Directives::default(),
+        directives: e.directives, // TODO validate directives
     })
 }
 

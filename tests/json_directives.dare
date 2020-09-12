@@ -1,0 +1,13 @@
+#[json(tag="myTag", content="myContent")]
+enum EnumObject {
+  // example of an alias
+  Simple1 as "one",
+  Other(List<Int8>),
+  SimpleThree(Bytes, String, List<Bool>),
+}
+
+#[json(repr="tuple")]
+enum EnumTuple {
+  Simple1 as "one",
+  Other(String)
+}

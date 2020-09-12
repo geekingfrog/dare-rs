@@ -16,7 +16,7 @@ mod dare;
 mod lexer;
 mod python;
 
-use lexer::{Lexer, Loc};
+use lexer::Lexer;
 
 #[derive(StructOpt, Debug)]
 // #[structopt(name = "basic")]
@@ -453,10 +453,10 @@ mod test {
     #[test]
     fn test_json_directive() {
         let expr = dare::EnumParser::new()
-            .parse(Lexer::new(r#"#[json(tag="customTag", content="customContent", repr = "tuple")] enum TestEnum {}"#))
+            .parse(Lexer::new("#[json(tag=\"customTag\", content=\"customContent\", repr = \"tuple\")]\nenum TestEnum {}"))
             .unwrap();
         let expected = Enum {
-            location: loc((1, 67), (1, 83)),
+            location: loc((2, 1), (2, 17)),
             name: "TestEnum".to_string(),
             type_parameters: vec![],
             variants: vec![],

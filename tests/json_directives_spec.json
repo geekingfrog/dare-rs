@@ -1,0 +1,70 @@
+{
+  "description": "Json directives",
+  "schema": "json_directives.dare",
+  "tests": {
+    "EnumObject": [
+      {
+        "description": "correct tag - variant with no data",
+        "valid": true,
+        "data": {
+          "myTag": "one"
+        }
+      },
+      {
+        "description": "incorrect tag key - variant with no data",
+        "valid": false,
+        "data": {
+          "tag": "one"
+        }
+      },
+      {
+        "description": "correct data - variant with one type",
+        "valid": true,
+        "data": {
+          "myTag": "Other",
+          "myContent": [1, 8]
+        }
+      },
+      {
+        "description": "incorrect tag key - variant with one type",
+        "valid": false,
+        "data": {
+          "tag": "Other",
+          "myContent": [1, 8]
+        }
+      },
+      {
+        "description": "incorrect content key - variant with one type",
+        "valid": false,
+        "data": {
+          "myTag": "Other",
+          "contents": [1, 8]
+        }
+      },
+      {
+        "description": "correct data - variant with tuple",
+        "valid": true,
+        "data": {
+          "myTag": "SimpleThree",
+          "myContent": ["Zm9vCg==", "hello", [true, true]]
+        }
+      },
+      {
+        "description": "incorrect tag key - variant with tuple",
+        "valid": false,
+        "data": {
+          "tag": "SimpleThree",
+          "myContent": ["Zm9vCg==", "hello", [true, true]]
+        }
+      },
+      {
+        "description": "incorrect content key - variant with tuple",
+        "valid": false,
+        "data": {
+          "myTag": "SimpleThree",
+          "content": ["Zm9vCg==", "hello", [true, true]]
+        }
+      }
+    ]
+  }
+}
