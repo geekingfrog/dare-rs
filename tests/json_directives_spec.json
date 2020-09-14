@@ -22,7 +22,10 @@
         "valid": true,
         "data": {
           "myTag": "Other",
-          "myContent": [1, 8]
+          "myContent": [
+            1,
+            8
+          ]
         }
       },
       {
@@ -30,7 +33,10 @@
         "valid": false,
         "data": {
           "tag": "Other",
-          "myContent": [1, 8]
+          "myContent": [
+            1,
+            8
+          ]
         }
       },
       {
@@ -38,32 +44,124 @@
         "valid": false,
         "data": {
           "myTag": "Other",
-          "contents": [1, 8]
+          "contents": [
+            1,
+            8
+          ]
         }
       },
       {
-        "description": "correct data - variant with tuple",
+        "description": "correct data - variant with many types",
         "valid": true,
         "data": {
           "myTag": "SimpleThree",
-          "myContent": ["Zm9vCg==", "hello", [true, true]]
+          "myContent": [
+            "Zm9vCg==",
+            "hello",
+            [
+              true,
+              true
+            ]
+          ]
         }
       },
       {
-        "description": "incorrect tag key - variant with tuple",
+        "description": "incorrect tag key - variant with many types",
         "valid": false,
         "data": {
           "tag": "SimpleThree",
-          "myContent": ["Zm9vCg==", "hello", [true, true]]
+          "myContent": [
+            "Zm9vCg==",
+            "hello",
+            [
+              true,
+              true
+            ]
+          ]
         }
       },
       {
-        "description": "incorrect content key - variant with tuple",
+        "description": "incorrect content key - variant with many types",
         "valid": false,
         "data": {
           "myTag": "SimpleThree",
-          "content": ["Zm9vCg==", "hello", [true, true]]
+          "content": [
+            "Zm9vCg==",
+            "hello",
+            [
+              true,
+              true
+            ]
+          ]
         }
+      }
+    ],
+    "EnumTuple": [
+      {
+        "description": "correct tuple - variant with no data",
+        "valid": true,
+        "data": [
+          "one"
+        ]
+      },
+      {
+        "description": "unknown tag",
+        "valid": false,
+        "data": [
+          "tag doesn't exist"
+        ]
+      },
+      {
+        "description": "correct tuple - variant with one type",
+        "valid": true,
+        "data": [
+          "TupleOther",
+          "Zm9vCg=="
+        ]
+      },
+      {
+        "description": "correct tuple - variant with many types",
+        "valid": true,
+        "data": [
+          "tuple_three",
+          "Zm9vCg==",
+          [
+            8
+          ],
+          "hello"
+        ]
+      },
+      {
+        "description": "invalid tuple - variant with one type, missing data",
+        "valid": false,
+        "data": [
+          "TupleOther"
+        ]
+      },
+      {
+        "description": "invalid tuple - variant with one type, wrong number of arguments",
+        "valid": false,
+        "data": [
+          "TupleOther", 1, 2, 3
+        ]
+      },
+      {
+        "description": "invalid tuple - variant with many types, missing data",
+        "valid": false,
+        "data": [
+          "tuple_three",
+          1
+        ]
+      },
+      {
+        "description": "invalid tuple - variant with many types, wrong number of arguments",
+        "valid": false,
+        "data": [
+          "tuple_three",
+          1,
+          2,
+          3
+        ]
       }
     ]
   }

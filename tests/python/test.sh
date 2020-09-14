@@ -20,4 +20,6 @@ if [ ! -f ./venv/bin/mypy ]; then
   python -m venv venv
   ./venv/bin/pip install mypy
 fi
+
+echo "Running mypy"
 ./venv/bin/mypy --strict .

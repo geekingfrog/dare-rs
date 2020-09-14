@@ -556,17 +556,15 @@ fn gen_py_sum_type(mut gen_ctx: &mut GenCtx, e: &Enum<ResolvedReference>) -> PyT
             .collect(),
     ));
     tokens.push(PyToken::NewLine);
-
     tokens.push(PyToken::NewLine);
 
+    tokens.push(gen_from_json_enum(&e));
+
+    PyToken::Block(tokens)
+}
+
+fn gen_from_json_enum(e: &ast::Enum<ResolvedReference>) -> PyToken {
     let mut from_json_body = vec![];
-    from_json_body.push(
-        If::new(
-            "not isinstance(data, dict)".into(),
-            r#"raise ValidationError(message="Not a dictionnary")"#.into(),
-        )
-        .into(),
-    );
 
     let json_directive = e
         .directives
@@ -577,10 +575,41 @@ fn gen_py_sum_type(mut gen_ctx: &mut GenCtx, e: &Enum<ResolvedReference>) -> PyT
     let tag_name = json_directive.tag;
     let content_name = json_directive.content;
 
-    from_json_body.push(format!(r#"tag = data.get("{}")"#, tag_name).into());
-    from_json_body.push(PyToken::NewLine);
-    from_json_body.push(format!(r#"contents = data.get("{}")"#, content_name).into());
-    from_json_body.push(PyToken::NewLine);
+    match &json_directive.repr {
+        ast::JsonRepr::Object => {
+            from_json_body.push(
+                If::new(
+                    "not isinstance(data, dict)".into(),
+                    r#"raise ValidationError(message="Not a dictionnary")"#.into(),
+                )
+                .into(),
+            );
+            from_json_body.push(format!(r#"tag = data.get("{}")"#, tag_name).into());
+            from_json_body.push(PyToken::NewLine);
+            from_json_body.push(format!(r#"contents = data.get("{}")"#, content_name).into());
+            from_json_body.push(PyToken::NewLine);
+        }
+        ast::JsonRepr::Tuple => {
+            from_json_body.push(
+                If::new(
+                    "not isinstance(data, (list, tuple))".into(),
+                    r#"raise ValidationError(message="Not a list nor a tuple")"#.into(),
+                )
+                .into(),
+            );
+            from_json_body.push(
+                If::new(
+                    "not data".into(),
+                    r#"raise ValidationError(message="Need at least one element to parse")"#.into(),
+                )
+                .into(),
+            );
+            from_json_body.push(r#"tag = data[0]"#.into());
+            from_json_body.push(PyToken::NewLine);
+            from_json_body.push(r#"contents = data[1:]"#.into());
+            from_json_body.push(PyToken::NewLine);
+        }
+    }
 
     for variant in &e.variants {
         let arg = match variant.value {
@@ -603,7 +632,7 @@ fn gen_py_sum_type(mut gen_ctx: &mut GenCtx, e: &Enum<ResolvedReference>) -> PyT
     from_json_body
         .push(format!(r#"raise ValidationError(message="unknown tag {{}}".format(tag))"#).into());
 
-    tokens.extend(py_class(
+    PyToken::Block(py_class(
         &e.name.to_pascal_case(),
         vec![],
         vec![
@@ -626,9 +655,7 @@ fn gen_py_sum_type(mut gen_ctx: &mut GenCtx, e: &Enum<ResolvedReference>) -> PyT
                 Some(format!("{}TypeDef", e.name).into()),
             )),
         ],
-    ));
-
-    PyToken::Block(tokens)
+    ))
 }
 
 fn gen_enum_variant(
@@ -654,7 +681,7 @@ fn gen_enum_variant(
 
     class_body.push(gen_enum_variant_init(&mut gen_ctx, &variant, &directives));
 
-    class_body.push(gen_enum_variant_to_json(
+    class_body.push(gen_to_json_enum_variant(
         &gen_ctx,
         &variant,
         &directives,
@@ -773,7 +800,7 @@ fn gen_enum_variant_tuple(
 fn gen_enum_variant_init(
     gen_ctx: &mut GenCtx,
     variant: &ast::EnumVariant<ResolvedReference>,
-    _directives: &ast::Directives,
+    directives: &ast::Directives,
 ) -> PyToken {
     let mut init_body = vec![];
 
@@ -791,14 +818,28 @@ fn gen_enum_variant_init(
                 init_body.push(PyToken::NewLine);
                 init_body.push(PyToken::NewLine);
 
+                let json_directive = directives
+                    .json
+                    .as_ref()
+                    .map(|x| x.1.clone())
+                    .unwrap_or_default();
+
+                let parse_fn = match &json_directive.repr {
+                    ast::JsonRepr::Object => format!(
+                        "self.inner = {}",
+                        get_parse_function(&gen_ctx, &refs[0], "inner", 0)
+                    ),
+                    ast::JsonRepr::Tuple => format!(
+                        "self.inner = parse_singleton({}, {})",
+                        get_parse_function(&gen_ctx, &refs[0], "", 1),
+                        "inner"
+                    ),
+                };
+
                 init_body.extend(py_fn(
                     "__init__".into(),
                     vec!["self".into(), typed_attr("inner", vec!["Any".into()], None)],
-                    vec![format!(
-                        "self.inner = {}",
-                        get_parse_function(&gen_ctx, &refs[0], "inner", 0)
-                    )
-                    .into()],
+                    vec![parse_fn.into()],
                     Some("None".into()),
                 ));
 
@@ -849,7 +890,7 @@ fn gen_enum_variant_init(
 }
 
 /// Generate the function to_json(self) -> JSONType for a given enum's variant
-fn gen_enum_variant_to_json(
+fn gen_to_json_enum_variant(
     gen_ctx: &GenCtx,
     variant: &ast::EnumVariant<ResolvedReference>,
     directives: &ast::Directives,

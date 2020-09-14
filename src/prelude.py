@@ -72,6 +72,18 @@ def parse_list(parse: Callable[[Any], V], l: Any) -> List[V]:
     return result
 
 
+def parse_singleton(parse: Callable[[Any], V], l: Any) -> V:
+    """
+    parse a list of length 1 (useful for sum types)
+    """
+    parsed = parse_list(parse, l)
+    if len(parsed) != 1:
+        raise ValidationError(
+            message="Must have exactly one element but got {}".format(len(parsed))
+        )
+    return parsed[0]
+
+
 def parse_map(
     parse_key: Callable[[Any], K], parse_val: Callable[[Any], V], x: Any
 ) -> Dict[K, V]:
