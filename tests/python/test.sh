@@ -2,12 +2,12 @@
 
 set -euo pipefail
 
-# mkdir -p dare
-# cargo run -- --schema ../atomic_struct.dare --target-dir ./dare
-# cargo run -- --schema ../simple_enum.dare --target-dir ./dare
-# cargo run -- --schema ../simple_sum.dare --target-dir ./dare
-# cargo run -- --schema ../references.dare --target-dir ./dare
-# cargo run -- --schema ../json_directives.dare --target-dir ./dare
+mkdir -p dare
+cargo run -- --schema ../atomic_struct.dare --target-dir ./dare
+cargo run -- --schema ../simple_enum.dare --target-dir ./dare
+cargo run -- --schema ../simple_sum.dare --target-dir ./dare
+cargo run -- --schema ../references.dare --target-dir ./dare
+cargo run -- --schema ../json_directives.dare --target-dir ./dare
 
 if [ ! -f ./venv/bin/pytest ]; then
   python -m venv venv

@@ -226,7 +226,7 @@ impl JsonDirective {
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum JsonRepr {
-    Nested,
+    Object,
     Tuple,
     // Flat,
     // Union,
@@ -234,7 +234,7 @@ pub enum JsonRepr {
 
 impl Default for JsonRepr {
     fn default() -> Self {
-        JsonRepr::Nested
+        JsonRepr::Object
     }
 }
 
@@ -243,7 +243,7 @@ impl TryFrom<String> for JsonRepr {
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         if value == "nested" {
-            Ok(JsonRepr::Nested)
+            Ok(JsonRepr::Object)
         } else if value == "tuple" {
             Ok(JsonRepr::Tuple)
         } else {

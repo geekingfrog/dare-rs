@@ -6,8 +6,8 @@ enum EnumObject {
   SimpleThree(Bytes, String, List<Bool>),
 }
 
-#[json(repr="tuple")]
-enum EnumTuple {
-  Simple1 as "one",
-  Other(String)
-}
+// #[json(repr="tuple")]
+// enum EnumTuple {
+//   Simple1 as "one",
+//   Other(String)
+// }
