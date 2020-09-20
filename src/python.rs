@@ -281,7 +281,7 @@ fn gather_imports(tokens: &[PyToken]) -> ImportMap {
             full: false,
             specifics: vec![
                 "TypeVar", "Any", "cast", "Dict", "List", "Optional", "Callable", "Union", "Tuple",
-            ],
+            ].into_iter().collect(),
         },
     );
 
@@ -289,7 +289,7 @@ fn gather_imports(tokens: &[PyToken]) -> ImportMap {
         "base64",
         ImportEntry {
             full: true,
-            specifics: vec![],
+            specifics: BTreeSet::new(),
         },
     );
 
@@ -297,7 +297,7 @@ fn gather_imports(tokens: &[PyToken]) -> ImportMap {
         "binascii",
         ImportEntry {
             full: true,
-            specifics: vec![],
+            specifics: BTreeSet::new(),
         },
     );
 
@@ -313,7 +313,7 @@ fn gather_imports(tokens: &[PyToken]) -> ImportMap {
                 }
                 PyImport::Specific(module, name) => {
                     let entry = import_map.imports.entry(module.as_str()).or_default();
-                    entry.specifics.push(name);
+                    entry.specifics.insert(name);
                 }
                 PyImport::Try(prim_module, fallback_module, name) => {
                     import_map.with_fallbacks.insert((
@@ -535,9 +535,13 @@ fn gen_simple_enum(e: &Enum<ResolvedReference>) -> PyToken {
 
 fn gen_py_sum_type(mut gen_ctx: &mut GenCtx, e: &Enum<ResolvedReference>) -> PyToken {
     let mut tokens = vec![];
+    let mut variants_type_names = vec![];
+
     for variant in &e.variants {
-        tokens.push(gen_enum_variant(&mut gen_ctx, &variant, &e.directives));
+        let (name, tok) = gen_enum_variant(&mut gen_ctx, &variant, &e.directives);
+        tokens.push(tok);
         tokens.push(PyToken::NewLine);
+        variants_type_names.push(name);
     }
 
     // the union of all variants
@@ -550,20 +554,20 @@ fn gen_py_sum_type(mut gen_ctx: &mut GenCtx, e: &Enum<ResolvedReference>) -> PyT
     // the union of all variants after calling to_json() on them
     tokens.push(format!("{}JSON = ", e.name).into());
     tokens.push(typed_union(
-        e.variants
+        variants_type_names
             .iter()
-            .map(|v| format!("{}JSON", v.name).into())
+            .map(|n| format!("{}", n).into())
             .collect(),
     ));
     tokens.push(PyToken::NewLine);
     tokens.push(PyToken::NewLine);
 
-    tokens.push(gen_from_json_enum(&e));
+    tokens.push(gen_from_json_enum(&mut gen_ctx, &e));
 
     PyToken::Block(tokens)
 }
 
-fn gen_from_json_enum(e: &ast::Enum<ResolvedReference>) -> PyToken {
+fn gen_from_json_enum(_gen_ctx: &GenCtx, e: &ast::Enum<ResolvedReference>) -> PyToken {
     let mut from_json_body = vec![];
 
     let json_directive = e
@@ -609,6 +613,10 @@ fn gen_from_json_enum(e: &ast::Enum<ResolvedReference>) -> PyToken {
             from_json_body.push(r#"contents = data[1:]"#.into());
             from_json_body.push(PyToken::NewLine);
         }
+        ast::JsonRepr::Union => {
+            from_json_body.push("contents = data".into());
+            from_json_body.push(PyToken::NewLine);
+        }
     }
 
     for variant in &e.variants {
@@ -629,8 +637,66 @@ fn gen_from_json_enum(e: &ast::Enum<ResolvedReference>) -> PyToken {
         );
     }
 
-    from_json_body
-        .push(format!(r#"raise ValidationError(message="unknown tag {{}}".format(tag))"#).into());
+    match json_directive.repr {
+        ast::JsonRepr::Object | ast::JsonRepr::Tuple => {
+            from_json_body.push(
+                format!(r#"raise ValidationError(message="unknown tag {{}}".format(tag))"#).into(),
+            );
+        }
+        ast::JsonRepr::Union => {
+            from_json_body.push(
+                If::new(
+                    "tag is not None".into(),
+                    format!(r#"raise ValidationError(message="unknown tag {{}}".format(tag))"#)
+                        .into(),
+                )
+                .into(),
+            );
+
+            from_json_body.push(PyToken::NewLine);
+            let (only_ctors, other_ctors): (Vec<_>, Vec<_>) =
+                e.variants.iter().partition(|v| v.value.is_only_ctor());
+            if !only_ctors.is_empty() {
+                from_json_body.push(
+                    If::new(
+                        "contents is None".into(),
+                        format!("return {}()", only_ctors[0].name.to_pascal_case()).into(),
+                    )
+                    .into(),
+                );
+            }
+
+            for v in other_ctors.iter() {
+                let suppress = PyToken::Import(
+                    PyImport::Specific("contextlib".to_string(), "suppress".to_string()),
+                    None,
+                );
+                from_json_body.extend(vec![
+                    "with ".into(),
+                    suppress,
+                    "(ValidationError):".into(),
+                    indent(1),
+                    format!("return {}(contents)", v.name.to_pascal_case()).into(),
+                    indent(-1),
+                ]);
+            }
+
+            from_json_body
+                .push(r#"raise ValidationError(message="Could not parse any variant")"#.into());
+
+            from_json_body.push(PyToken::NewLine);
+        }
+    }
+
+    let mut from_json_args = vec!["cls".into(), typed_attr("data", vec!["Any".into()], None)];
+    match json_directive.repr {
+        ast::JsonRepr::Union => from_json_args.push(typed_attr(
+            "tag",
+            vec!["Optional[str]".into()],
+            Some("None".into()),
+        )),
+        _ => {}
+    };
 
     PyToken::Block(py_class(
         &e.name.to_pascal_case(),
@@ -640,7 +706,7 @@ fn gen_from_json_enum(e: &ast::Enum<ResolvedReference>) -> PyToken {
             PyToken::NewLine,
             PyToken::Block(py_fn(
                 "from_json",
-                vec!["cls".into(), typed_attr("data", vec!["Any".into()], None)],
+                from_json_args,
                 vec![py_try(
                     PyToken::Block(from_json_body),
                     vec![(
@@ -662,7 +728,7 @@ fn gen_enum_variant(
     mut gen_ctx: &mut GenCtx,
     variant: &ast::EnumVariant<ResolvedReference>,
     directives: &ast::Directives,
-) -> PyToken {
+) -> (String, PyToken) {
     let mut tokens = Vec::new();
     let dataclass = PyToken::Import(
         PyImport::Specific("dataclasses".to_owned(), "dataclass".to_owned()),
@@ -693,7 +759,7 @@ fn gen_enum_variant(
     tokens.push(PyToken::NewLine);
     tokens.extend(py_class(&variant.name.to_pascal_case(), vec![], class_body));
 
-    PyToken::Block(tokens)
+    (td_name, PyToken::Block(tokens))
 }
 
 /// name and tokens to describe the return type of .to_json()
@@ -707,6 +773,7 @@ fn gen_enum_variant_json_type(
     match repr {
         ast::JsonRepr::Object => gen_enum_variant_typedict(&gen_ctx, &variant, directives),
         ast::JsonRepr::Tuple => gen_enum_variant_tuple(&gen_ctx, &variant),
+        ast::JsonRepr::Union => gen_enum_variant_union(&gen_ctx, &variant),
     }
 }
 
@@ -795,6 +862,36 @@ fn gen_enum_variant_tuple(
     )
 }
 
+fn gen_enum_variant_union(
+    gen_ctx: &GenCtx,
+    variant: &ast::EnumVariant<ResolvedReference>,
+) -> (String, PyToken) {
+    match &variant.value {
+        VariantValue::OnlyCtor => ("None".to_string(), PyToken::Block(vec![])),
+        VariantValue::PositionalCtor(refs) => {
+            let name = format!("{}JSON", variant.name.to_pascal_case());
+            if refs.len() == 1 {
+                return (
+                    name.clone(),
+                    format!("{} = {}", name, refs[0].get_json_type(&gen_ctx)).into(),
+                );
+            }
+
+            let mut typs = vec![format!("{} = ", name.clone()).into(), type_import("Tuple")];
+            typs.push("[".into());
+            typs.extend(intersperce(
+                ", ".into(),
+                refs.iter()
+                    .map(|t| t.get_json_type(&gen_ctx).into())
+                    .collect(),
+            ));
+            typs.push("]".into());
+            (name, PyToken::Block(typs))
+        }
+        VariantValue::StructCtor(_) => todo!("anon struct in sum type"),
+    }
+}
+
 /// Generate the __init__ function for a given enum's variant.
 /// Also generate tokens for the `inner` attribute
 fn gen_enum_variant_init(
@@ -825,7 +922,7 @@ fn gen_enum_variant_init(
                     .unwrap_or_default();
 
                 let parse_fn = match &json_directive.repr {
-                    ast::JsonRepr::Object => format!(
+                    ast::JsonRepr::Object | ast::JsonRepr::Union => format!(
                         "self.inner = {}",
                         get_parse_function(&gen_ctx, &refs[0], "inner", 0)
                     ),
@@ -915,6 +1012,9 @@ fn gen_to_json_enum_variant(
             ast::JsonRepr::Tuple => {
                 function_body.push(format!(r#"return ("{}",)"#, tag_val).into());
             }
+            ast::JsonRepr::Union => {
+                function_body.push("return None".into());
+            }
         },
 
         VariantValue::PositionalCtor(refs) => {
@@ -950,6 +1050,11 @@ fn gen_to_json_enum_variant(
                 }
                 ast::JsonRepr::Tuple => {
                     function_body.push(format!(r#"return ("{}", "#, tag_val).into());
+                    function_body.extend(intersperce(", ".into(), to_json_contents));
+                    function_body.push(")".into());
+                }
+                ast::JsonRepr::Union => {
+                    function_body.push("return (".into());
                     function_body.extend(intersperce(", ".into(), to_json_contents));
                     function_body.push(")".into());
                 }
@@ -1381,7 +1486,7 @@ impl<'tokens> ImportMap<'tokens> {
 #[derive(Default, Debug, Clone)]
 struct ImportEntry<'tokens> {
     full: bool,
-    specifics: Vec<&'tokens str>,
+    specifics: BTreeSet<&'tokens str>,
 }
 
 impl<'tokens> ImportEntry<'tokens> {
@@ -1599,7 +1704,7 @@ fn py_imports(im: ImportMap) -> PyToken {
 
         if !imp_map.specifics.is_empty() {
             ts.push(PyToken::Raw(format!("from {} import ", imp_name)));
-            let imps = intersperce(", ", imp_map.specifics);
+            let imps = intersperce(", ", imp_map.specifics.into_iter().collect());
             ts.extend(imps.into_iter().map(|x| x.into()).collect::<Vec<_>>());
             ts.push(PyToken::NewLine);
         }

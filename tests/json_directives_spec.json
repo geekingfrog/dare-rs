@@ -142,7 +142,10 @@
         "description": "invalid tuple - variant with one type, wrong number of arguments",
         "valid": false,
         "data": [
-          "TupleOther", 1, 2, 3
+          "TupleOther",
+          1,
+          2,
+          3
         ]
       },
       {
@@ -161,6 +164,47 @@
           1,
           2,
           3
+        ]
+      }
+    ],
+    "EnumUnion": [
+      {
+        "description": "correct union - variant with no data",
+        "valid": true,
+        "data": null
+      },
+      {
+        "description": "correct union - variant with one type",
+        "valid": true,
+        "data": "Zm9vCg=="
+      },
+      {
+        "description": "correct union - variant with many types",
+        "valid": true,
+        "data": [
+          "Zm9vCg==",
+          [
+            8
+          ],
+          "hello"
+        ]
+      },
+      {
+        "description": "invalid union - correct arity but invalid type",
+        "valid": false,
+        "data": [
+          12
+        ]
+      },
+      {
+        "description": "invalid union - incorrect arity",
+        "valid": false,
+        "data": [
+          "Zm9vCg==",
+          [
+            1,
+            2
+          ]
         ]
       }
     ]

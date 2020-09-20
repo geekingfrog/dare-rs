@@ -12,3 +12,12 @@ enum EnumTuple {
   TupleOther(Bytes),
   TupleThree(Bytes, List<Int>, String) as "tuple_three",
 }
+
+#[json(repr="union")]
+enum EnumUnion {
+  UnionSimple1 as "one",
+  UnionSimple2,
+  UnionOther(Bytes),
+  UnionString(String),
+  UnionThree(Bytes, List<Int>, String) as "tuple_three",
+}

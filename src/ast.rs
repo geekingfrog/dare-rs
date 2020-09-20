@@ -1,4 +1,4 @@
-use crate::lexer::{self, LexicalError, Loc, SrcSpan};
+use crate::lexer::{LexicalError, Loc, SrcSpan};
 use anyhow::Result;
 use std::{collections::BTreeMap, vec::Vec};
 use std::{convert::TryFrom, fmt::Debug};
@@ -100,6 +100,15 @@ pub enum VariantValue<Reference> {
     StructCtor(Vec<Field<Reference>>),
 }
 
+impl<Reference> VariantValue<Reference> {
+    pub fn is_only_ctor(&self) -> bool {
+        match &self {
+            VariantValue::OnlyCtor => true,
+            _ => false,
+        }
+    }
+}
+
 /// A type can be atomic (String, Bool, Int…), a reference to another type
 /// (Foo, Bar<T>, Map<String, Int>), or a generic type like `T` or `errorType`.
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -159,12 +168,6 @@ pub enum Builtin<Reference> {
     Optional(Box<Type<Reference>>),
     Map(Box<Type<Reference>>, Box<Type<Reference>>),
 }
-
-// #[derive(Debug, PartialEq, Eq, Default, Clone, Copy)]
-// pub struct SrcSpan {
-//     pub start: lexer::Loc,
-//     pub end: lexer::Loc,
-// }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct JsonDirective {
@@ -228,8 +231,7 @@ impl JsonDirective {
 pub enum JsonRepr {
     Object,
     Tuple,
-    // Flat,
-    // Union,
+    Union,
 }
 
 impl Default for JsonRepr {
@@ -246,6 +248,8 @@ impl TryFrom<String> for JsonRepr {
             Ok(JsonRepr::Object)
         } else if value == "tuple" {
             Ok(JsonRepr::Tuple)
+        } else if value == "union" {
+            Ok(JsonRepr::Union)
         } else {
             Err(format!("Unknown json directive argument: {}", value))
         }

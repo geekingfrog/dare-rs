@@ -11,19 +11,21 @@ from typing import Any, List, Tuple, TypedDict, cast
 
 
 class Test(TypedDict):
+    __test__ = False
+
     description: str
     valid: bool
     data: Any
 
 
-class TestSpec(TypedDict):
+class Spec(TypedDict):
     description: str
     test: Test
     obj: str
     module: Any
 
 
-def gather_tests(specs_and_modules: List[Tuple[str, Any]]) -> List[TestSpec]:
+def gather_tests(specs_and_modules: List[Tuple[str, Any]]) -> List[Spec]:
     tests = []
     for spec_name, module in specs_and_modules:
         with open(spec_name) as fd:
@@ -32,7 +34,7 @@ def gather_tests(specs_and_modules: List[Tuple[str, Any]]) -> List[TestSpec]:
             for t in ts:
                 tests.append(
                     cast(
-                        TestSpec,
+                        Spec,
                         {
                             "description": t["description"],
                             "test": t,
@@ -57,7 +59,7 @@ def gather_tests(specs_and_modules: List[Tuple[str, Any]]) -> List[TestSpec]:
     ),
     ids=itemgetter("description"),
 )
-def test_atomic_struct_customer(test_spec: TestSpec) -> None:
+def test_atomic_struct_customer(test_spec: Spec) -> None:
 
     test = test_spec["test"]
     func = getattr(test_spec["module"], test_spec["obj"]).from_json

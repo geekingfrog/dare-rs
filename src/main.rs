@@ -451,7 +451,7 @@ mod test {
     }
 
     #[test]
-    fn test_json_directive() {
+    fn test_json_directive_tuple() {
         let expr = dare::EnumParser::new()
             .parse(Lexer::new("#[json(tag=\"customTag\", content=\"customContent\", repr = \"tuple\")]\nenum TestEnum {}"))
             .unwrap();
@@ -467,6 +467,31 @@ mod test {
                         repr: JsonRepr::Tuple,
                         tag: "customTag".to_string(),
                         content: "customContent".to_string(),
+                    },
+                )),
+            },
+        };
+
+        assert_eq!(expr, expected);
+    }
+
+    #[test]
+    fn test_json_directive_union() {
+        let expr = dare::EnumParser::new()
+            .parse(Lexer::new("#[json(repr = \"union\")]\nenum TestEnum {}"))
+            .unwrap();
+        let expected = Enum {
+            location: loc((2, 1), (2, 17)),
+            name: "TestEnum".to_string(),
+            type_parameters: vec![],
+            variants: vec![],
+            directives: Directives {
+                json: Some((
+                    loc((1, 1), (1, 24)),
+                    JsonDirective {
+                        repr: JsonRepr::Union,
+                        tag: "tag".to_string(),
+                        content: "contents".to_string(),
                     },
                 )),
             },
