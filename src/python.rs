@@ -281,7 +281,9 @@ fn gather_imports(tokens: &[PyToken]) -> ImportMap {
             full: false,
             specifics: vec![
                 "TypeVar", "Any", "cast", "Dict", "List", "Optional", "Callable", "Union", "Tuple",
-            ].into_iter().collect(),
+            ]
+            .into_iter()
+            .collect(),
         },
     );
 
@@ -1400,20 +1402,23 @@ impl From<Type<String>> for PyToken {
     }
 }
 
-// // TODO: remove that. Only done to silence the compiler while I'm fixing other stuff
-// impl From<Type<usize>> for PyToken {
-//     fn from(t: Type<usize>) -> Self {
-//         todo!("can't implement From, need to have a function which resolve reference")
-//     }
-// }
-
 impl Type<usize> {
     fn to_py_token(&self, gen_ctx: &GenCtx) -> PyToken {
         match &self {
             Type::Atomic(at) => at.into(),
             Type::Reference(r) => {
                 let referenced_decl = &gen_ctx.top_declarations[r.name];
-                referenced_decl.get_name().into()
+                match referenced_decl {
+                    TopDeclaration::Struct(s) => s.name.clone().into(),
+                    TopDeclaration::Enum(e) => {
+                        if e.is_simple_enum() {
+                            e.name.clone().into()
+                        } else {
+                            format!("{}TypeDef", e.name).into()
+                        }
+                    }
+                    TopDeclaration::Alias(_) => todo!("py token for alias"),
+                }
             }
             Type::Builtin(b) => match b {
                 Builtin::List(t) => {

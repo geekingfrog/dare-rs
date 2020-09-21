@@ -11,7 +11,7 @@ from typing import Any, List, Tuple, TypedDict, cast
 
 
 class Test(TypedDict):
-    __test__ = False
+    __test__ = False # type: ignore
 
     description: str
     valid: bool

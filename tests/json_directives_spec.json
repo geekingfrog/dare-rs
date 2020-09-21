@@ -207,6 +207,30 @@
           ]
         ]
       }
+    ],
+    "KitchenSink": [
+      {
+        "description": "valid enum with an object as data",
+        "valid": true,
+        "data": {
+          "tag": "One",
+          "contents": {
+            "myTag": "one"
+          }
+        }
+      },
+      {
+        "description": "valid enum with everything",
+        "valid": true,
+        "data": {
+          "tag": "Everything",
+          "contents": [
+            {"myTag": "Other", "myContent": [1]},
+            ["one"],
+            "one"
+          ]
+        }
+      }
     ]
   }
 }

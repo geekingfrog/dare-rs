@@ -21,3 +21,8 @@ enum EnumUnion {
   UnionString(String),
   UnionThree(Bytes, List<Int>, String) as "tuple_three",
 }
+
+enum KitchenSink {
+  One(EnumObject),
+  Everything(EnumObject, EnumTuple, EnumUnion)
+}
