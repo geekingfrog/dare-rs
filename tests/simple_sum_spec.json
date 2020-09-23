@@ -70,7 +70,7 @@
         }
       },
       {
-        "description": "invvalid TwoArgs: wrong length",
+        "description": "invalid TwoArgs: wrong length",
         "valid": false,
         "data": {
           "tag": "TwoArgs",
@@ -82,7 +82,7 @@
         }
       },
       {
-        "description": "invvalid TwoArgs: invalid types",
+        "description": "invalid TwoArgs: invalid types",
         "valid": false,
         "data": {
           "tag": "TwoArgs",

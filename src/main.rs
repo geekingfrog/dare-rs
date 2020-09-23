@@ -66,7 +66,7 @@ mod test {
     use super::*;
     use ast::{
         Alias, AtomicType, Builtin, Directives, Enum, EnumVariant, Field, JsonDirective, JsonRepr,
-        RefType, Struct, Type, VariantValue,
+        RefType, Struct, Type, VariantValue, FieldType,
     };
     use lexer::{Loc, SrcSpan};
     use pretty_assertions::assert_eq;
@@ -162,12 +162,12 @@ mod test {
                     Field {
                         location: loc((2, 13), (2, 24)),
                         name: "field1".to_string(),
-                        typ: Type::Atomic(AtomicType::Int)
+                        typ: FieldType::Type(Type::Atomic(AtomicType::Int))
                     },
                     Field {
                         location: loc((3, 13), (3, 25)),
                         name: "field2".to_string(),
-                        typ: Type::Atomic(AtomicType::Bool)
+                        typ: FieldType::Type(Type::Atomic(AtomicType::Bool))
                     }
                 ],
             }
@@ -189,7 +189,7 @@ mod test {
                 fields: vec![Field {
                     location: loc((1, 28), (1, 39)),
                     name: "field1".to_string(),
-                    typ: make_generic("Foo", vec![], loc((1, 36), (1, 39))),
+                    typ: FieldType::Type(make_generic("Foo", vec![], loc((1, 36), (1, 39)))),
                 },]
             }
         )
@@ -415,12 +415,12 @@ mod test {
                     Field {
                         location: loc((1, 17), (1, 24)),
                         name: "f1".to_string(),
-                        typ: Type::Atomic(AtomicType::Int),
+                        typ: FieldType::Type(Type::Atomic(AtomicType::Int)),
                     },
                     Field {
                         location: loc((1, 26), (1, 36)),
                         name: "f2".to_string(),
-                        typ: Type::Atomic(AtomicType::Str),
+                        typ: FieldType::Type(Type::Atomic(AtomicType::Str)),
                     },
                 ]),
             }],

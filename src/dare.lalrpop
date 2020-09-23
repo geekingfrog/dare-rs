@@ -8,6 +8,7 @@ use crate::ast::{
   AtomicType,
   RefType,
   Field,
+  FieldType,
   EnumVariant,
   VariantValue,
   TopDeclaration,
@@ -71,7 +72,7 @@ pub Field: Field<String> = {
   <s:@L> <name:word> ":" <typ: Type> <e:@L> => Field {
     location: location(s, e),
     name: name.to_string(),
-    typ,
+    typ: FieldType::Type(typ),
   },
 }
 

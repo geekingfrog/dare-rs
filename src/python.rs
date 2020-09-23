@@ -1,6 +1,7 @@
 use crate::ast;
 use crate::ast::{
-    Alias, AtomicType, Builtin, Enum, ResolvedReference, Struct, TopDeclaration, Type, VariantValue,
+    Alias, AtomicType, Builtin, Enum, FieldType, ResolvedReference, Struct, TopDeclaration, Type,
+    VariantValue,
 };
 use inflections::Inflect;
 use std::collections::{BTreeMap, BTreeSet};
@@ -115,14 +116,15 @@ fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct<ResolvedReference>) -> Vec<PyToken
 
     let mut init_args = vec!["self".into()];
     init_args.extend(s.fields.iter().map(|f| {
-        typed_attr(
-            &f.name.to_snake_case(),
-            vec![
-                Type::Builtin(Builtin::Optional(Box::new(unpack_optional(f.typ.clone()))))
-                    .to_py_token(&gen_ctx),
-            ],
-            None,
-        )
+        let tok = match &f.typ {
+            FieldType::TypeOf(_) => "Optional[str]".into(),
+            FieldType::Type(t) => {
+                Type::Builtin(Builtin::Optional(Box::new(unpack_optional(t.clone()))))
+                    .to_py_token(&gen_ctx)
+            }
+        };
+
+        typed_attr(&f.name.to_snake_case(), vec![tok], None)
     }));
 
     let mut init_body = vec![];
@@ -135,7 +137,7 @@ fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct<ResolvedReference>) -> Vec<PyToken
 
         init_body.push("try:".into());
         init_body.push(indent(1));
-        let parse_fn = get_parse_function(&gen_ctx, &field.typ, &name, 0);
+        let parse_fn = &field.typ.get_parse_function(&gen_ctx, &name, 0);
         init_body.push(format!("self.{} = {}", name, parse_fn).into());
         init_body.push(indent(-1));
         init_body.push("except ValidationError as e:".into());
@@ -223,7 +225,8 @@ fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct<ResolvedReference>) -> Vec<PyToken
                         format!(
                             r#""{}": self.{},"#,
                             f.name,
-                            get_dump_function(&gen_ctx, &f.typ, &name.to_snake_case(), 0)
+                            &f.typ
+                                .get_dump_function(&gen_ctx, &name.to_snake_case(), 0)
                                 .unwrap_or(name)
                         )
                         .into()
@@ -334,131 +337,231 @@ fn gather_imports(tokens: &[PyToken]) -> ImportMap {
     import_map
 }
 
-/// Given a `Type`, return a string representing the function to parse json into
-/// that type
-fn get_parse_function(
-    gen_ctx: &GenCtx,
-    t: &Type<ResolvedReference>,
-    name: &str,
-    depth: u8,
-) -> String {
-    match t {
-        Type::Atomic(at) => {
-            let (instance, _err) = atomic_py_instance(at);
-            if depth == 0 {
-                format!("parse_{}({})", instance, name)
-            } else {
-                format!("parse_{}", instance)
+/// trait to gather the methods for conversion to and from json in python
+trait PythonJSON {
+    /// Given a `Type`, return a string representing the function to parse json into
+    /// that type
+    fn get_parse_function(&self, gen_ctx: &GenCtx, name: &str, depth: u8) -> String;
+
+    /// Dual of get_parse_function, returns a String representing the function to convert
+    /// the given type into json representation
+    fn get_dump_function(&self, gen_ctx: &GenCtx, name: &str, depth: u8) -> Option<String>;
+
+    /// Returns a python type hint for the type itself
+    /// It's usually the name of the type except for sums
+    fn get_python_type(&self, gen_ctx: &GenCtx) -> String;
+
+    /// Returns a python type hint for the json representation of
+    /// this type after serialization.
+    fn get_json_type(&self, gen_ctx: &GenCtx) -> String;
+}
+
+impl PythonJSON for Type<ResolvedReference> {
+    fn get_dump_function(&self, gen_ctx: &GenCtx, name: &str, depth: u8) -> Option<String> {
+        match self {
+            Type::Atomic(at) => match at {
+                AtomicType::Bytes => {
+                    if depth == 0 {
+                        Some(format!("dump_bytes({})", name))
+                    } else {
+                        Some("dump_bytes".to_owned())
+                    }
+                }
+                _ => None,
+            },
+            Type::Builtin(b) => match b {
+                Builtin::List(t) => {
+                    match t.get_dump_function(&gen_ctx, name, depth + 1) {
+                        // the inner type doesn't need any conversion, so the list
+                        // itself also doesn't need conversion
+                        None => None,
+                        Some(d) => {
+                            if depth == 0 {
+                                Some(format!("dump_list({}, {})", d, name))
+                            } else {
+                                Some(format!("lambda x{}: dump_list({}, x{})", depth, d, depth))
+                            }
+                        }
+                    }
+                }
+                Builtin::Optional(t) => {
+                    match t.get_dump_function(&gen_ctx, name, depth + 1) {
+                        // the inner type doesn't need any conversion, so the type
+                        // itself also doesn't need conversion
+                        None => None,
+                        Some(d) => {
+                            if depth == 0 {
+                                Some(format!("dump_optional({}, {})", d, name))
+                            } else {
+                                Some(format!(
+                                    "lambda x{}: dump_optional({}, x{})",
+                                    depth, d, depth
+                                ))
+                            }
+                        }
+                    }
+                }
+                Builtin::Map(_k, v) => {
+                    // TODO check if the type for the key can be serialised as a string
+                    match v.get_dump_function(&gen_ctx, name, depth + 1) {
+                        Some(f) => {
+                            if depth == 0 {
+                                Some(format!("dump_object({}, {})", f, name))
+                            } else {
+                                Some(format!("lambda x{}: dump_object({}, x{})", depth, f, depth))
+                            }
+                        }
+                        None => None,
+                    }
+                }
+            },
+            Type::Reference(_r) => {
+                // let referenced_decl = &gen_ctx.top_declarations[r.name];
+                // TODO check if the referenced top declaration is an alias. In this case
+                // simply calling to_json on it will not work
+                if depth == 0 {
+                    Some(format!("{}.to_json()", name))
+                } else {
+                    Some("lambda x: x.to_json()".to_owned())
+                }
             }
         }
-        Type::Builtin(builtin_type) => match builtin_type {
-            Builtin::Optional(opt_type) => {
-                let nested = get_parse_function(&gen_ctx, opt_type, name, depth + 1);
+    }
+
+    fn get_parse_function(&self, gen_ctx: &GenCtx, name: &str, depth: u8) -> String {
+        match self {
+            Type::Atomic(at) => {
+                let (instance, _err) = atomic_py_instance(at);
                 if depth == 0 {
-                    format!("parse_optional({}, {})", nested, name)
+                    format!("parse_{}({})", instance, name)
                 } else {
-                    format!("lambda x{}: parse_optional({}, x{})", depth, nested, depth)
+                    format!("parse_{}", instance)
                 }
             }
-            Builtin::List(inner) => {
-                let nested = get_parse_function(&gen_ctx, inner, name, depth + 1);
+            Type::Builtin(builtin_type) => match builtin_type {
+                Builtin::Optional(opt_type) => {
+                    let nested = opt_type.get_parse_function(&gen_ctx, name, depth + 1);
+                    if depth == 0 {
+                        format!("parse_optional({}, {})", nested, name)
+                    } else {
+                        format!("lambda x{}: parse_optional({}, x{})", depth, nested, depth)
+                    }
+                }
+                Builtin::List(inner) => {
+                    let nested = inner.get_parse_function(&gen_ctx, name, depth + 1);
+                    if depth == 0 {
+                        format!("parse_list({}, {})", nested, name)
+                    } else {
+                        format!("lambda x{}: parse_list({}, x{})", depth, nested, depth)
+                    }
+                }
+                Builtin::Map(key_type, val_type) => {
+                    let parse_key_fn =
+                        key_type.get_parse_function(&gen_ctx, "key_name?", depth + 1);
+                    let parse_val_fn =
+                        val_type.get_parse_function(&gen_ctx, "val_name?", depth + 1);
+                    format!("parse_map({}, {}, {})", parse_key_fn, parse_val_fn, name)
+                }
+            },
+            Type::Reference(r) => {
+                let referenced_decl = &gen_ctx.top_declarations[r.name];
                 if depth == 0 {
-                    format!("parse_list({}, {})", nested, name)
+                    format!("{}.from_json({})", referenced_decl.get_name(), name)
                 } else {
-                    format!("lambda x{}: parse_list({}, x{})", depth, nested, depth)
+                    format!("{}.from_json", referenced_decl.get_name(),)
                 }
             }
-            Builtin::Map(key_type, val_type) => {
-                let parse_key_fn = get_parse_function(&gen_ctx, key_type, "key_name?", depth + 1);
-                let parse_val_fn = get_parse_function(&gen_ctx, val_type, "val_name?", depth + 1);
-                format!("parse_map({}, {}, {})", parse_key_fn, parse_val_fn, name)
+        }
+    }
+
+    fn get_python_type(&self, gen_ctx: &GenCtx) -> String {
+        match self {
+            Type::Atomic(at) => atomic_py_instance(at).0.to_owned(),
+            Type::Reference(r) => {
+                let referenced_decl = &gen_ctx.top_declarations[r.name];
+                referenced_decl.get_py_python_type()
             }
-        },
-        Type::Reference(r) => {
-            let referenced_decl = &gen_ctx.top_declarations[r.name];
-            if depth == 0 {
-                format!("{}.from_json({})", referenced_decl.get_name(), name)
-            } else {
-                format!("{}.from_json", referenced_decl.get_name(),)
+            Type::Builtin(b) => match b {
+                Builtin::List(inner) => format!("List[{}]", inner.get_python_type(&gen_ctx)),
+                Builtin::Optional(inner) => {
+                    format!("Optional[{}]", inner.get_python_type(&gen_ctx))
+                }
+                Builtin::Map(k, v) => format!(
+                    "Mapping[{}, {}]",
+                    k.get_python_type(&gen_ctx),
+                    v.get_python_type(&gen_ctx)
+                ),
+            },
+        }
+    }
+
+    fn get_json_type(&self, gen_ctx: &GenCtx) -> String {
+        match &self {
+            Type::Atomic(t) => match t {
+                AtomicType::Str => "str",
+                AtomicType::UInt => "int",
+                AtomicType::Int => "int",
+                AtomicType::Int8 => "int",
+                AtomicType::Int16 => "int",
+                AtomicType::Int32 => "int",
+                AtomicType::Int64 => "int",
+                AtomicType::UInt8 => "int",
+                AtomicType::UInt16 => "int",
+                AtomicType::UInt32 => "int",
+                AtomicType::UInt64 => "int",
+                AtomicType::Float => "float",
+                AtomicType::Bool => "bool",
+                // bytes get converted to base64
+                AtomicType::Bytes => "str",
+            }
+            .to_owned(),
+            Type::Builtin(b) => match b {
+                Builtin::List(inner) => format!("List[{}]", inner.get_json_type(&gen_ctx)),
+                Builtin::Optional(inner) => format!("Optional[{}]", inner.get_json_type(&gen_ctx)),
+                Builtin::Map(k, v) => format!(
+                    "Mapping[{}, {}]",
+                    k.get_json_type(&gen_ctx),
+                    v.get_json_type(&gen_ctx)
+                ),
+            },
+            Type::Reference(r) => {
+                let referenced_decl = &gen_ctx.top_declarations[r.name];
+                referenced_decl.get_py_json_type()
             }
         }
     }
 }
 
-/// Dual of get_parse_function, returns a String representing the function to convert
-/// the given type into json representation
-fn get_dump_function(
-    _gen_ctx: &GenCtx,
-    t: &Type<ResolvedReference>,
-    name: &str,
-    depth: u8,
-) -> Option<String> {
-    match t {
-        Type::Atomic(at) => match at {
-            AtomicType::Bytes => {
-                if depth == 0 {
-                    Some(format!("dump_bytes({})", name))
-                } else {
-                    Some("dump_bytes".to_owned())
-                }
+impl PythonJSON for FieldType<ResolvedReference> {
+    fn get_parse_function(&self, gen_ctx: &GenCtx, name: &str, depth: u8) -> String {
+        match self {
+            FieldType::TypeOf(_) => {
+                Type::Atomic(AtomicType::Str).get_parse_function(&gen_ctx, name, depth)
             }
-            _ => None,
-        },
-        Type::Builtin(b) => match b {
-            Builtin::List(t) => {
-                match get_dump_function(&_gen_ctx, t, name, depth + 1) {
-                    // the inner type doesn't need any conversion, so the list
-                    // itself also doesn't need conversion
-                    None => None,
-                    Some(d) => {
-                        if depth == 0 {
-                            Some(format!("dump_list({}, {})", d, name))
-                        } else {
-                            Some(format!("lambda x{}: dump_list({}, x{})", depth, d, depth))
-                        }
-                    }
-                }
+            FieldType::Type(t) => t.get_parse_function(&gen_ctx, name, depth),
+        }
+    }
+
+    fn get_dump_function(&self, gen_ctx: &GenCtx, name: &str, depth: u8) -> Option<String> {
+        match self {
+            FieldType::TypeOf(_) => {
+                Type::Atomic(AtomicType::Str).get_dump_function(&gen_ctx, name, depth)
             }
-            Builtin::Optional(t) => {
-                match get_dump_function(&_gen_ctx, t, name, depth + 1) {
-                    // the inner type doesn't need any conversion, so the type
-                    // itself also doesn't need conversion
-                    None => None,
-                    Some(d) => {
-                        if depth == 0 {
-                            Some(format!("dump_optional({}, {})", d, name))
-                        } else {
-                            Some(format!(
-                                "lambda x{}: dump_optional({}, x{})",
-                                depth, d, depth
-                            ))
-                        }
-                    }
-                }
-            }
-            Builtin::Map(_k, v) => {
-                // TODO check if the type for the key can be serialised as a string
-                match get_dump_function(&_gen_ctx, v, name, depth + 1) {
-                    Some(f) => {
-                        if depth == 0 {
-                            Some(format!("dump_object({}, {})", f, name))
-                        } else {
-                            Some(format!("lambda x{}: dump_object({}, x{})", depth, f, depth))
-                        }
-                    }
-                    None => None,
-                }
-            }
-        },
-        Type::Reference(_r) => {
-            // let referenced_decl = &gen_ctx.top_declarations[r.name];
-            // TODO check if the referenced top declaration is an alias. In this case
-            // simply calling to_json on it will not work
-            if depth == 0 {
-                Some(format!("{}.to_json()", name))
-            } else {
-                Some("lambda x: x.to_json()".to_owned())
-            }
+            FieldType::Type(t) => t.get_dump_function(&gen_ctx, name, depth),
+        }
+    }
+
+    fn get_python_type(&self, gen_ctx: &GenCtx) -> String {
+        match self {
+            FieldType::TypeOf(_) => "str".to_string(),
+            FieldType::Type(t) => t.get_python_type(gen_ctx),
+        }
+    }
+
+    fn get_json_type(&self, gen_ctx: &GenCtx) -> String {
+        match self {
+            FieldType::TypeOf(_) => "str".to_string(),
+            FieldType::Type(t) => t.get_json_type(&gen_ctx),
         }
     }
 }
@@ -926,11 +1029,11 @@ fn gen_enum_variant_init(
                 let parse_fn = match &json_directive.repr {
                     ast::JsonRepr::Object | ast::JsonRepr::Union => format!(
                         "self.inner = {}",
-                        get_parse_function(&gen_ctx, &refs[0], "inner", 0)
+                        (&refs[0]).get_parse_function(&gen_ctx, "inner", 0)
                     ),
                     ast::JsonRepr::Tuple => format!(
                         "self.inner = parse_singleton({}, {})",
-                        get_parse_function(&gen_ctx, &refs[0], "", 1),
+                        (&refs[0]).get_parse_function(&gen_ctx, "", 1),
                         "inner"
                     ),
                 };
@@ -963,7 +1066,7 @@ fn gen_enum_variant_init(
 
                 let mut parse_fns: Vec<_> = refs
                     .iter()
-                    .map(|t| get_parse_function(&gen_ctx, t, "", 1))
+                    .map(|t| t.get_parse_function(&gen_ctx, "", 1))
                     .collect();
                 parse_fns.push("inner".to_owned());
 
@@ -1023,7 +1126,8 @@ fn gen_to_json_enum_variant(
             // let mut to_json_contents = vec!["str".into()];
             let to_json_contents = if refs.len() == 1 {
                 let val_name = "self.inner".to_string();
-                vec![get_dump_function(&gen_ctx, &refs[0], &val_name, 0)
+                vec![(&refs[0])
+                    .get_dump_function(&gen_ctx, &val_name, 0)
                     .unwrap_or(val_name)
                     .into()]
             } else {
@@ -1031,7 +1135,7 @@ fn gen_to_json_enum_variant(
                     .enumerate()
                     .map(|(idx, r)| {
                         let val_name = format!("self.inner[{}]", idx);
-                        get_dump_function(&gen_ctx, r, &val_name, 0)
+                        r.get_dump_function(&gen_ctx, &val_name, 0)
                             .unwrap_or(val_name)
                             .into()
                     })
@@ -1248,69 +1352,6 @@ fn render(conf: &PyConfig, mut ctx: &mut FormatContext, tokens: &[PyToken]) -> S
         }
     }
     buf.join("")
-}
-
-impl Type<ResolvedReference> {
-    /// Returns a python type hint for the type itself
-    /// It's usually the name if the type except for sums
-    fn get_python_type(&self, gen_ctx: &GenCtx) -> String {
-        match self {
-            Type::Atomic(at) => atomic_py_instance(at).0.to_owned(),
-            Type::Reference(r) => {
-                let referenced_decl = &gen_ctx.top_declarations[r.name];
-                referenced_decl.get_py_python_type()
-            }
-            Type::Builtin(b) => match b {
-                Builtin::List(inner) => format!("List[{}]", inner.get_python_type(&gen_ctx)),
-                Builtin::Optional(inner) => {
-                    format!("Optional[{}]", inner.get_python_type(&gen_ctx))
-                }
-                Builtin::Map(k, v) => format!(
-                    "Mapping[{}, {}]",
-                    k.get_python_type(&gen_ctx),
-                    v.get_python_type(&gen_ctx)
-                ),
-            },
-        }
-    }
-
-    /// Returns a python type hint for the json representation of
-    /// this type after serialization.
-    fn get_json_type(&self, gen_ctx: &GenCtx) -> String {
-        match &self {
-            Type::Atomic(t) => match t {
-                AtomicType::Str => "str",
-                AtomicType::UInt => "int",
-                AtomicType::Int => "int",
-                AtomicType::Int8 => "int",
-                AtomicType::Int16 => "int",
-                AtomicType::Int32 => "int",
-                AtomicType::Int64 => "int",
-                AtomicType::UInt8 => "int",
-                AtomicType::UInt16 => "int",
-                AtomicType::UInt32 => "int",
-                AtomicType::UInt64 => "int",
-                AtomicType::Float => "float",
-                AtomicType::Bool => "bool",
-                // bytes get converted to base64
-                AtomicType::Bytes => "str",
-            }
-            .to_owned(),
-            Type::Builtin(b) => match b {
-                Builtin::List(inner) => format!("List[{}]", inner.get_json_type(&gen_ctx)),
-                Builtin::Optional(inner) => format!("Optional[{}]", inner.get_json_type(&gen_ctx)),
-                Builtin::Map(k, v) => format!(
-                    "Mapping[{}, {}]",
-                    k.get_json_type(&gen_ctx),
-                    v.get_json_type(&gen_ctx)
-                ),
-            },
-            Type::Reference(r) => {
-                let referenced_decl = &gen_ctx.top_declarations[r.name];
-                referenced_decl.get_py_json_type()
-            }
-        }
-    }
 }
 
 #[derive(Clone, Debug)]

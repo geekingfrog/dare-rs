@@ -41,7 +41,13 @@ pub struct Struct<Reference> {
 pub struct Field<Reference> {
     pub location: SrcSpan,
     pub name: String,
-    pub typ: Type<Reference>,
+    pub typ: FieldType<Reference>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum FieldType<Reference> {
+    TypeOf(String),
+    Type(Type<Reference>),
 }
 
 /// enum Foo = {A, B, C, D}
@@ -333,8 +339,18 @@ fn validate_field(mappings: &Mappings, f: Field<String>) -> Result<Field<usize>>
     Ok(Field {
         location: f.location,
         name: f.name,
-        typ: validate_type(&mappings, f.typ)?,
+        typ: validate_field_type(&mappings, f.typ)?,
     })
+}
+
+fn validate_field_type(mappings: &Mappings, f: FieldType<String>) -> Result<FieldType<usize>> {
+    match f {
+        FieldType::TypeOf(x) => Ok(FieldType::TypeOf(x)),
+        FieldType::Type(t) => {
+            let validated = validate_type(&mappings, t)?;
+            Ok(FieldType::Type(validated))
+        }
+    }
 }
 
 fn validate_enum(mappings: &Mappings, e: Enum<String>) -> Result<Enum<usize>> {
