@@ -69,11 +69,21 @@ pub RefType: RefType<String> = {
 }
 
 pub Field: Field<String> = {
-  <s:@L> <name:word> ":" <typ: Type> <e:@L> => Field {
+  <s:@L> <name:FieldName> ":" <typ: FieldType> <e:@L> => Field {
     location: location(s, e),
     name: name.to_string(),
-    typ: FieldType::Type(typ),
+    typ,
   },
+}
+
+pub FieldName: String = {
+  <quoted_word> => <>,
+  <word> => <>,
+}
+
+pub FieldType: FieldType<String> = {
+  "#" "[" "typeof" "(" <field_name:word> ")" "]" => FieldType::TypeOf(field_name),
+  <typ:Type> => FieldType::Type(typ),
 }
 
 pub Type: Type<String> = {
@@ -213,6 +223,7 @@ extern {
     "Bool"            => lexer::Tok::Keyword(lexer::Keyword::Bool),
     "Bytes"           => lexer::Tok::Keyword(lexer::Keyword::Bytes),
     "as"              => lexer::Tok::Keyword(lexer::Keyword::As),
+    "typeof"          => lexer::Tok::Keyword(lexer::Keyword::TypeOf),
     quoted_word       => lexer::Tok::Str(<String>),
     Word              => lexer::Tok::CapitalizedLabel(<String>),
     word              => lexer::Tok::Label(<String>),

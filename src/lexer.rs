@@ -66,6 +66,7 @@ pub enum Keyword {
     Bool,
     Bytes,
     As,
+    TypeOf,
 }
 
 impl Display for Keyword {
@@ -92,6 +93,7 @@ impl Display for Keyword {
             Keyword::Bool => f.write_str("Bool"),
             Keyword::Bytes => f.write_str("Bytes"),
             Keyword::As => f.write_str("as"),
+            Keyword::TypeOf => f.write_str("typeof"),
         }
     }
 }
@@ -119,6 +121,7 @@ fn lookup_keyword(raw: &str) -> Option<Keyword> {
         "Bool" => Some(Keyword::Bool),
         "Bytes" => Some(Keyword::Bytes),
         "as" => Some(Keyword::As),
+        "typeof" => Some(Keyword::TypeOf),
         _ => None,
     }
 }

@@ -500,6 +500,27 @@ mod test {
         assert_eq!(expr, expected);
     }
 
+    #[test]
+    fn test_typeof() {
+        let expr = dare::StructParser::new()
+            .parse(Lexer::new(r#"struct Foo {"type": #[typeof(blah)]}"#))
+            .unwrap();
+        let expected = Struct {
+            location: loc((1,1), (1,37)),
+            name: "Foo".to_string(),
+            type_parameters: vec![],
+            fields: vec![
+                Field{
+                    location: loc((1, 13), (1,36)),
+                    name: "type".to_string(),
+                    typ: FieldType::TypeOf("blah".to_string()),
+                }
+            ],
+        };
+
+        assert_eq!(expr, expected);
+    }
+
     fn make_generic(name: &str, params: Vec<Type<String>>, loc: SrcSpan) -> Type<String> {
         Type::Reference(RefType {
             location: loc,
