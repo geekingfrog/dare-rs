@@ -23,16 +23,16 @@ use lalrpop_util::ParseError;
 
 grammar;
 
-pub TopDeclarations: Vec<TopDeclaration<String>> = {
+pub TopDeclarations: Vec<TopDeclaration> = {
   TopDeclaration* => <>,
 }
 
-pub TopDeclaration: TopDeclaration<String> = {
+pub TopDeclaration: TopDeclaration = {
   Struct => TopDeclaration::Struct(<>),
   Enum => TopDeclaration::Enum(<>),
 }
 
-pub Struct: Struct<String> = {
+pub Struct: Struct = {
   <s:@L> "struct" <name:Word> <params: TopLevelParams> "{" <fields:Comma<Field>> "}" <e:@L> => Struct {
     location: location(s, e),
     name: name.to_string(),
@@ -41,7 +41,7 @@ pub Struct: Struct<String> = {
   }
 }
 
-pub Enum: Enum<String> = {
+pub Enum: Enum = {
   <directives:Directives?>
   <s:@L> "enum" <name:Word> <params: TopLevelParams> "{" <variants:Comma<EnumVariant>> "}" <e:@L> => Enum {
     location: location(s, e),
@@ -52,7 +52,7 @@ pub Enum: Enum<String> = {
   }
 }
 
-pub Alias: Alias<String> = {
+pub Alias: Alias = {
   <s:@L> "type" <name:Word> "=" <alias:RefType> <e:@L> => Alias {
     location: location(s, e),
     name: name.to_string(),
@@ -60,7 +60,7 @@ pub Alias: Alias<String> = {
   }
 }
 
-pub RefType: RefType<String> = {
+pub RefType: RefType = {
   <s:@L> <n:Word> <params:("<" <Comma<Type>> ">")?> <e:@L> => RefType {
     location: location(s, e),
     name: n.to_string(),
@@ -68,7 +68,7 @@ pub RefType: RefType<String> = {
   },
 }
 
-pub Field: Field<String> = {
+pub Field: Field = {
   <s:@L> <name:FieldName> ":" <typ: FieldType> <e:@L> => Field {
     location: location(s, e),
     name: name.to_string(),
@@ -81,12 +81,12 @@ pub FieldName: String = {
   <word> => <>,
 }
 
-pub FieldType: FieldType<String> = {
+pub FieldType: FieldType = {
   "#" "[" "typeof" "(" <field_name:word> ")" "]" => FieldType::TypeOf(field_name),
   <typ:Type> => FieldType::Type(typ),
 }
 
-pub Type: Type<String> = {
+pub Type: Type = {
   <atom:AtomicType> => Type::Atomic(atom),
   <s:@L> <n:Word> <types:("<" <Comma<Type>> ">")?> <e:@L> => Type::Reference(RefType {
     location: location(s, e),
@@ -119,7 +119,7 @@ TopLevelParams: Vec<String> = {
   }
 }
 
-EnumVariant: EnumVariant<String> = {
+EnumVariant: EnumVariant = {
   <s:@L> <name:Word> <value:VariantValue> <alias:("as" <quoted_word>)?> <e:@L> => EnumVariant {
     location: location(s, e),
     name: name.to_string(),
@@ -128,7 +128,7 @@ EnumVariant: EnumVariant<String> = {
   }
 }
 
-VariantValue: VariantValue<String> = {
+VariantValue: VariantValue = {
   "{" <fields:Comma<Field>> "}" => VariantValue::StructCtor(
     fields
   ),

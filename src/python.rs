@@ -1,7 +1,8 @@
-use crate::ast;
-use crate::ast::{
-    Alias, AtomicType, Builtin, Enum, FieldType, ResolvedReference, Struct, TopDeclaration, Type,
-    VariantValue,
+use crate::gen_ast;
+use crate::ast::{JsonDirective, JsonRepr, Directives};
+use crate::gen_ast::{
+    Alias, AtomicType, Builtin, Enum, FieldType, Struct, TopDeclaration, Type,
+    VariantValue, EnumVariant
 };
 use inflections::Inflect;
 use std::collections::{BTreeMap, BTreeSet};
@@ -10,7 +11,7 @@ use std::convert::From;
 pub const SRC_PYTHON_PRELUDE: &'static str = include_str!("prelude.py");
 
 #[allow(dead_code)]
-pub fn gen_python(decls: &[ast::TopDeclaration<ResolvedReference>]) -> Vec<PyToken> {
+pub fn gen_python(decls: &[gen_ast::TopDeclaration]) -> Vec<PyToken> {
     let mut gen_ctx = GenCtx::new(decls);
     let code_tokens: Vec<PyToken> = decls
         .iter()
@@ -51,11 +52,12 @@ struct GenCtx<'decls> {
     /// instead of putting that in the prelude, track which tuple arities
     /// are required. The parsing code will be generated on the fly
     tuple_arities: BTreeSet<u8>,
-    top_declarations: &'decls [ast::TopDeclaration<ResolvedReference>],
+
+    top_declarations: &'decls [TopDeclaration],
 }
 
 impl<'decls> GenCtx<'decls> {
-    fn new(decls: &'decls [ast::TopDeclaration<ResolvedReference>]) -> Self {
+    fn new(decls: &'decls [TopDeclaration]) -> Self {
         GenCtx {
             tuple_arities: BTreeSet::new(),
             top_declarations: decls,
@@ -65,7 +67,7 @@ impl<'decls> GenCtx<'decls> {
 
 fn gen_python_top_decl(
     mut gen_ctx: &mut GenCtx,
-    decl: &ast::TopDeclaration<ResolvedReference>,
+    decl: &gen_ast::TopDeclaration,
 ) -> Vec<PyToken> {
     let mut tokens = Vec::new();
 
@@ -80,7 +82,7 @@ fn gen_python_top_decl(
     tokens
 }
 
-fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct<ResolvedReference>) -> Vec<PyToken> {
+fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct) -> Vec<PyToken> {
     let mut tokens = Vec::new();
     let td = PyToken::Import(try_import("TypedDict", "typing", "typing_extensions"), None);
 
@@ -254,7 +256,7 @@ fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct<ResolvedReference>) -> Vec<PyToken
     tokens
 }
 
-fn gen_py_enum(mut gen_ctx: &mut GenCtx, e: &Enum<ResolvedReference>) -> Vec<PyToken> {
+fn gen_py_enum(mut gen_ctx: &mut GenCtx, e: &Enum) -> Vec<PyToken> {
     if !e.type_parameters.is_empty() {
         panic!("Enum with type parameters not supported yet");
     }
@@ -269,7 +271,7 @@ fn gen_py_enum(mut gen_ctx: &mut GenCtx, e: &Enum<ResolvedReference>) -> Vec<PyT
     tokens
 }
 
-fn gen_py_alias(_a: &Alias<ResolvedReference>) -> Vec<PyToken> {
+fn gen_py_alias(_a: &Alias) -> Vec<PyToken> {
     todo!("gen py alias")
 }
 
@@ -356,7 +358,7 @@ trait PythonJSON {
     fn get_json_type(&self, gen_ctx: &GenCtx) -> String;
 }
 
-impl PythonJSON for Type<ResolvedReference> {
+impl PythonJSON for Type {
     fn get_dump_function(&self, gen_ctx: &GenCtx, name: &str, depth: u8) -> Option<String> {
         match self {
             Type::Atomic(at) => match at {
@@ -464,7 +466,7 @@ impl PythonJSON for Type<ResolvedReference> {
                 }
             },
             Type::Reference(r) => {
-                let referenced_decl = &gen_ctx.top_declarations[r.name];
+                let referenced_decl = r.target.as_ref();
                 if depth == 0 {
                     format!("{}.from_json({})", referenced_decl.get_name(), name)
                 } else {
@@ -478,8 +480,7 @@ impl PythonJSON for Type<ResolvedReference> {
         match self {
             Type::Atomic(at) => atomic_py_instance(at).0.to_owned(),
             Type::Reference(r) => {
-                let referenced_decl = &gen_ctx.top_declarations[r.name];
-                referenced_decl.get_py_python_type()
+                r.target.get_py_python_type()
             }
             Type::Builtin(b) => match b {
                 Builtin::List(inner) => format!("List[{}]", inner.get_python_type(&gen_ctx)),
@@ -525,14 +526,13 @@ impl PythonJSON for Type<ResolvedReference> {
                 ),
             },
             Type::Reference(r) => {
-                let referenced_decl = &gen_ctx.top_declarations[r.name];
-                referenced_decl.get_py_json_type()
+                r.target.get_py_json_type()
             }
         }
     }
 }
 
-impl PythonJSON for FieldType<ResolvedReference> {
+impl PythonJSON for FieldType {
     fn get_parse_function(&self, gen_ctx: &GenCtx, name: &str, depth: u8) -> String {
         match self {
             FieldType::TypeOf(_) => {
@@ -566,7 +566,7 @@ impl PythonJSON for FieldType<ResolvedReference> {
     }
 }
 
-fn gen_simple_enum(e: &Enum<ResolvedReference>) -> PyToken {
+fn gen_simple_enum(e: &Enum) -> PyToken {
     let enum_class = PyToken::Import(
         PyImport::Specific("enum".to_owned(), "Enum".to_owned()),
         None,
@@ -638,7 +638,7 @@ fn gen_simple_enum(e: &Enum<ResolvedReference>) -> PyToken {
     PyToken::Block(py_class(&e.name.to_pascal_case(), vec![enum_class], body))
 }
 
-fn gen_py_sum_type(mut gen_ctx: &mut GenCtx, e: &Enum<ResolvedReference>) -> PyToken {
+fn gen_py_sum_type(mut gen_ctx: &mut GenCtx, e: &Enum) -> PyToken {
     let mut tokens = vec![];
     let mut variants_type_names = vec![];
 
@@ -672,7 +672,7 @@ fn gen_py_sum_type(mut gen_ctx: &mut GenCtx, e: &Enum<ResolvedReference>) -> PyT
     PyToken::Block(tokens)
 }
 
-fn gen_from_json_enum(_gen_ctx: &GenCtx, e: &ast::Enum<ResolvedReference>) -> PyToken {
+fn gen_from_json_enum(_gen_ctx: &GenCtx, e: &Enum) -> PyToken {
     let mut from_json_body = vec![];
 
     let json_directive = e
@@ -685,7 +685,7 @@ fn gen_from_json_enum(_gen_ctx: &GenCtx, e: &ast::Enum<ResolvedReference>) -> Py
     let content_name = json_directive.content;
 
     match &json_directive.repr {
-        ast::JsonRepr::Object => {
+        JsonRepr::Object => {
             from_json_body.push(
                 If::new(
                     "not isinstance(data, dict)".into(),
@@ -698,7 +698,7 @@ fn gen_from_json_enum(_gen_ctx: &GenCtx, e: &ast::Enum<ResolvedReference>) -> Py
             from_json_body.push(format!(r#"contents = data.get("{}")"#, content_name).into());
             from_json_body.push(PyToken::NewLine);
         }
-        ast::JsonRepr::Tuple => {
+        JsonRepr::Tuple => {
             from_json_body.push(
                 If::new(
                     "not isinstance(data, (list, tuple))".into(),
@@ -718,7 +718,7 @@ fn gen_from_json_enum(_gen_ctx: &GenCtx, e: &ast::Enum<ResolvedReference>) -> Py
             from_json_body.push(r#"contents = data[1:]"#.into());
             from_json_body.push(PyToken::NewLine);
         }
-        ast::JsonRepr::Union => {
+        JsonRepr::Union => {
             from_json_body.push("contents = data".into());
             from_json_body.push(PyToken::NewLine);
         }
@@ -743,12 +743,12 @@ fn gen_from_json_enum(_gen_ctx: &GenCtx, e: &ast::Enum<ResolvedReference>) -> Py
     }
 
     match json_directive.repr {
-        ast::JsonRepr::Object | ast::JsonRepr::Tuple => {
+        JsonRepr::Object | JsonRepr::Tuple => {
             from_json_body.push(
                 format!(r#"raise ValidationError(message="unknown tag {{}}".format(tag))"#).into(),
             );
         }
-        ast::JsonRepr::Union => {
+        JsonRepr::Union => {
             from_json_body.push(
                 If::new(
                     "tag is not None".into(),
@@ -795,7 +795,7 @@ fn gen_from_json_enum(_gen_ctx: &GenCtx, e: &ast::Enum<ResolvedReference>) -> Py
 
     let mut from_json_args = vec!["cls".into(), typed_attr("data", vec!["Any".into()], None)];
     match json_directive.repr {
-        ast::JsonRepr::Union => from_json_args.push(typed_attr(
+        JsonRepr::Union => from_json_args.push(typed_attr(
             "tag",
             vec!["Optional[str]".into()],
             Some("None".into()),
@@ -831,8 +831,8 @@ fn gen_from_json_enum(_gen_ctx: &GenCtx, e: &ast::Enum<ResolvedReference>) -> Py
 
 fn gen_enum_variant(
     mut gen_ctx: &mut GenCtx,
-    variant: &ast::EnumVariant<ResolvedReference>,
-    directives: &ast::Directives,
+    variant: &EnumVariant,
+    directives: &Directives,
 ) -> (String, PyToken) {
     let mut tokens = Vec::new();
     let dataclass = PyToken::Import(
@@ -870,29 +870,29 @@ fn gen_enum_variant(
 /// name and tokens to describe the return type of .to_json()
 fn gen_enum_variant_json_type(
     gen_ctx: &mut GenCtx,
-    variant: &ast::EnumVariant<ResolvedReference>,
-    directives: &ast::Directives,
+    variant: &EnumVariant,
+    directives: &Directives,
 ) -> (String, PyToken) {
     let x = directives.json.as_ref().map(|x| x.1.repr);
     let repr = x.unwrap_or_default();
     match repr {
-        ast::JsonRepr::Object => gen_enum_variant_typedict(&gen_ctx, &variant, directives),
-        ast::JsonRepr::Tuple => gen_enum_variant_tuple(&gen_ctx, &variant),
-        ast::JsonRepr::Union => gen_enum_variant_union(&gen_ctx, &variant),
+        JsonRepr::Object => gen_enum_variant_typedict(&gen_ctx, &variant, directives),
+        JsonRepr::Tuple => gen_enum_variant_tuple(&gen_ctx, &variant),
+        JsonRepr::Union => gen_enum_variant_union(&gen_ctx, &variant),
     }
 }
 
 fn gen_enum_variant_typedict(
     gen_ctx: &GenCtx,
-    variant: &ast::EnumVariant<ResolvedReference>,
-    directives: &ast::Directives,
+    variant: &EnumVariant,
+    directives: &Directives,
 ) -> (String, PyToken) {
     let tag_name = directives
         .json
         .as_ref()
-        .map_or_else(|| ast::JsonDirective::default().tag, |(_, x)| x.tag.clone());
+        .map_or_else(|| JsonDirective::default().tag, |(_, x)| x.tag.clone());
     let content_name = directives.json.as_ref().map_or_else(
-        || ast::JsonDirective::default().content,
+        || JsonDirective::default().content,
         |(_, x)| x.content.clone(),
     );
 
@@ -938,7 +938,7 @@ fn gen_enum_variant_typedict(
 
 fn gen_enum_variant_tuple(
     gen_ctx: &GenCtx,
-    variant: &ast::EnumVariant<ResolvedReference>,
+    variant: &EnumVariant,
 ) -> (String, PyToken) {
     let tuple = type_import("Tuple");
     let tuple_name = format!("{}JSON", variant.name);
@@ -969,7 +969,7 @@ fn gen_enum_variant_tuple(
 
 fn gen_enum_variant_union(
     gen_ctx: &GenCtx,
-    variant: &ast::EnumVariant<ResolvedReference>,
+    variant: &EnumVariant,
 ) -> (String, PyToken) {
     match &variant.value {
         VariantValue::OnlyCtor => ("None".to_string(), PyToken::Block(vec![])),
@@ -1001,8 +1001,8 @@ fn gen_enum_variant_union(
 /// Also generate tokens for the `inner` attribute
 fn gen_enum_variant_init(
     gen_ctx: &mut GenCtx,
-    variant: &ast::EnumVariant<ResolvedReference>,
-    directives: &ast::Directives,
+    variant: &EnumVariant,
+    directives: &Directives,
 ) -> PyToken {
     let mut init_body = vec![];
 
@@ -1027,11 +1027,11 @@ fn gen_enum_variant_init(
                     .unwrap_or_default();
 
                 let parse_fn = match &json_directive.repr {
-                    ast::JsonRepr::Object | ast::JsonRepr::Union => format!(
+                    JsonRepr::Object | JsonRepr::Union => format!(
                         "self.inner = {}",
                         (&refs[0]).get_parse_function(&gen_ctx, "inner", 0)
                     ),
-                    ast::JsonRepr::Tuple => format!(
+                    JsonRepr::Tuple => format!(
                         "self.inner = parse_singleton({}, {})",
                         (&refs[0]).get_parse_function(&gen_ctx, "", 1),
                         "inner"
@@ -1094,8 +1094,8 @@ fn gen_enum_variant_init(
 /// Generate the function to_json(self) -> JSONType for a given enum's variant
 fn gen_to_json_enum_variant(
     gen_ctx: &GenCtx,
-    variant: &ast::EnumVariant<ResolvedReference>,
-    directives: &ast::Directives,
+    variant: &EnumVariant,
+    directives: &Directives,
     json_type: &str,
 ) -> PyToken {
     let json_directive = directives
@@ -1111,13 +1111,13 @@ fn gen_to_json_enum_variant(
 
     match &variant.value {
         VariantValue::OnlyCtor => match &json_directive.repr {
-            ast::JsonRepr::Object => {
+            JsonRepr::Object => {
                 function_body.push(format!(r#"return {{"{}": "{}"}}"#, tag_name, tag_val).into());
             }
-            ast::JsonRepr::Tuple => {
+            JsonRepr::Tuple => {
                 function_body.push(format!(r#"return ("{}",)"#, tag_val).into());
             }
-            ast::JsonRepr::Union => {
+            JsonRepr::Union => {
                 function_body.push("return None".into());
             }
         },
@@ -1143,7 +1143,7 @@ fn gen_to_json_enum_variant(
             };
 
             match &json_directive.repr {
-                ast::JsonRepr::Object => {
+                JsonRepr::Object => {
                     function_body.push(
                         format!(
                             r#"return {{"{}": "{}", "{}": ("#,
@@ -1154,12 +1154,12 @@ fn gen_to_json_enum_variant(
                     function_body.extend(intersperce(", ".into(), to_json_contents));
                     function_body.push(")}".into());
                 }
-                ast::JsonRepr::Tuple => {
+                JsonRepr::Tuple => {
                     function_body.push(format!(r#"return ("{}", "#, tag_val).into());
                     function_body.extend(intersperce(", ".into(), to_json_contents));
                     function_body.push(")".into());
                 }
-                ast::JsonRepr::Union => {
+                JsonRepr::Union => {
                     function_body.push("return (".into());
                     function_body.extend(intersperce(", ".into(), to_json_contents));
                     function_body.push(")".into());
@@ -1422,8 +1422,8 @@ impl From<&str> for PyToken {
 }
 
 // impl<T: std::fmt::Debug + std::fmt::Display> From<Type<T>> for PyToken {
-impl From<Type<String>> for PyToken {
-    fn from(t: Type<String>) -> Self {
+impl From<Type> for PyToken {
+    fn from(t: Type) -> Self {
         match t {
             Type::Atomic(at) => at.into(),
             Type::Reference(r) => {
@@ -1443,12 +1443,13 @@ impl From<Type<String>> for PyToken {
     }
 }
 
-impl Type<usize> {
+impl Type {
     fn to_py_token(&self, gen_ctx: &GenCtx) -> PyToken {
         match &self {
             Type::Atomic(at) => at.into(),
             Type::Reference(r) => {
-                let referenced_decl = &gen_ctx.top_declarations[r.name];
+                // let referenced_decl = &gen_ctx.top_declarations[r.name];
+                let referenced_decl = r.target.as_ref();
                 match referenced_decl {
                     TopDeclaration::Struct(s) => s.name.clone().into(),
                     TopDeclaration::Enum(e) => {
@@ -1550,7 +1551,7 @@ impl<'tokens> ImportEntry<'tokens> {
     }
 }
 
-impl<T> TopDeclaration<T> {
+impl TopDeclaration {
     fn get_py_python_type(&self) -> String {
         match self {
             TopDeclaration::Struct(s) => s.name.to_owned(),
@@ -1669,7 +1670,7 @@ fn typed_attr(name: &str, typ: Vec<PyToken>, default_val: Option<PyToken>) -> Py
 }
 
 /// return the same type, with all Optional removed
-fn unpack_optional(typ: Type<ResolvedReference>) -> Type<ResolvedReference> {
+fn unpack_optional(typ: Type) -> Type {
     match typ {
         Type::Builtin(Builtin::Optional(t)) => *t,
         x => x,

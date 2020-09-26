@@ -15,6 +15,7 @@ mod ast;
 mod dare;
 mod lexer;
 mod python;
+mod gen_ast;
 
 use lexer::Lexer;
 
@@ -33,7 +34,7 @@ fn main() {
 
     let f = File::open(&opt.schema).unwrap();
     let raw_ast = parse(&f).unwrap();
-    let validated_ast = ast::validate_ast(raw_ast).unwrap();
+    let validated_ast = gen_ast::from_parse_ast(raw_ast).unwrap();
 
     let py_tokens = python::gen_python(&validated_ast[..]);
 
@@ -52,7 +53,7 @@ fn main() {
         .unwrap();
 }
 
-fn parse(f: &File) -> Result<Vec<ast::TopDeclaration<String>>> {
+fn parse(f: &File) -> Result<Vec<ast::TopDeclaration>> {
     let mut buf_reader = BufReader::new(f);
     let mut content = String::new();
     buf_reader.read_to_string(&mut content)?;
@@ -521,7 +522,7 @@ mod test {
         assert_eq!(expr, expected);
     }
 
-    fn make_generic(name: &str, params: Vec<Type<String>>, loc: SrcSpan) -> Type<String> {
+    fn make_generic(name: &str, params: Vec<Type>, loc: SrcSpan) -> Type {
         Type::Reference(RefType {
             location: loc,
             name: name.to_string(),
