@@ -69,20 +69,20 @@ pub RefType: RefType = {
 }
 
 pub Field: Field = {
-  <s:@L> <name:FieldName> ":" <typ: FieldType> <e:@L> => Field {
+  <s:@L> <name:AnyWord> ":" <typ: FieldType> <e:@L> => Field {
     location: location(s, e),
     name: name.to_string(),
     typ,
   },
 }
 
-pub FieldName: String = {
+pub AnyWord: String = {
   <quoted_word> => <>,
   <word> => <>,
 }
 
 pub FieldType: FieldType = {
-  "#" "[" "typeof" "(" <field_name:word> ")" "]" => FieldType::TypeOf(field_name),
+  "#" "[" "typeof" "(" <field_name:quoted_word> ")" "]" => FieldType::TypeOf(field_name),
   <typ:Type> => FieldType::Type(typ),
 }
 

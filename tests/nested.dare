@@ -1,0 +1,9 @@
+struct BaseStruct {
+  base: String
+}
+
+struct CompositeStruct {
+  field: Int,
+  inner: BaseStruct,
+  mb_inner: BaseStruct?,
+}

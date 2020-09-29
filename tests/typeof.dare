@@ -1,0 +1,10 @@
+#[json(repr="union")]
+enum Result {
+  Ok(String) as "ok",
+  Err(Int) as "err",
+}
+
+struct Response {
+  result: Result,
+  response_type: #[typeof("result")],
+}

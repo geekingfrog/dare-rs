@@ -276,12 +276,12 @@ impl<'input> Iterator for Lexer<'input> {
                     }
 
                     // output a label
-                    if c.is_ascii_alphabetic() {
+                    if c.is_ascii_alphabetic() || c == '_' {
                         let is_uppercase_word = c.is_uppercase();
                         let mut chars: Vec<char> = vec![c];
                         loop {
                             match self.chars.peek() {
-                                Some(c) if c.is_ascii_alphanumeric() => {
+                                Some(c) if (c.is_ascii_alphanumeric() || c == &'_') => {
                                     chars.push(*c);
                                     self.advance();
                                 }
@@ -369,7 +369,7 @@ mod test {
     }
 
     #[test]
-    fn test_struct() {
+    fn test_enum() {
         let tokens = Lexer::new("enum  {}")
             .run()
             .into_iter()
@@ -379,6 +379,19 @@ mod test {
             Ok(Tok::Keyword(Keyword::Enum)),
             Ok(Tok::OpenBrace),
             Ok(Tok::CloseBrace),
+        ];
+        assert_eq!(tokens, expected);
+    }
+
+    #[test]
+    fn test_word_with_underscore() {
+        let tokens = Lexer::new("foo_bar")
+            .run()
+            .into_iter()
+            .map(|r| r.map(|(_, tok, _)| tok))
+            .collect::<Vec<_>>();
+        let expected = vec![
+            Ok(Tok::Label("foo_bar".to_string())),
         ];
         assert_eq!(tokens, expected);
     }

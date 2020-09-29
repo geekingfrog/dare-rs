@@ -1,0 +1,32 @@
+{
+  "description": "typeof fields in structs",
+  "schema": "typeof.dare",
+  "tests": {
+    "Response": [
+      {
+        "description": "valid data with ok",
+        "valid": true,
+        "data": {
+          "result": "all is well",
+          "response_type": "ok"
+        }
+      },
+      {
+        "description": "valid data with err",
+        "valid": true,
+        "data": {
+          "result": 2,
+          "response_type": "err"
+        }
+      },
+      {
+        "description": "typeof tag must match value in enum",
+        "valid": false,
+        "data": {
+          "result": 2,
+          "response_type": "ok"
+        }
+      }
+    ]
+  }
+}

@@ -6,12 +6,20 @@
 import json
 import pytest
 from operator import itemgetter
-from dare import atomic_struct, simple_enum, simple_sum, references, json_directives
+from dare import (
+    atomic_struct,
+    simple_enum,
+    simple_sum,
+    references,
+    json_directives,
+    nested,
+    typeof,
+)
 from typing import Any, List, Tuple, TypedDict, cast
 
 
 class Test(TypedDict):
-    __test__ = False # type: ignore
+    __test__ = False  # type: ignore
 
     description: str
     valid: bool
@@ -55,11 +63,13 @@ def gather_tests(specs_and_modules: List[Tuple[str, Any]]) -> List[Spec]:
             ("../simple_sum_spec.json", simple_sum),
             ("../references_spec.json", references),
             ("../json_directives_spec.json", json_directives),
+            ("../nested_spec.json", nested),
+            # ("../typeof_spec.json", typeof),
         ]
     ),
     ids=itemgetter("description"),
 )
-def test_atomic_struct_customer(test_spec: Spec) -> None:
+def test_specs(test_spec: Spec) -> None:
 
     test = test_spec["test"]
     func = getattr(test_spec["module"], test_spec["obj"]).from_json

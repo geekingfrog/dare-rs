@@ -1,0 +1,19 @@
+{
+  "description": "Nesting",
+  "schema": "nested.dare",
+  "tests": {
+    "CompositeStruct": [
+      {
+        "description": "valid nested struct",
+        "valid": true,
+        "data": {
+          "field": 2,
+          "inner": {
+            "base": "basic"
+          },
+          "mb_inner": null
+        }
+      }
+    ]
+  }
+}

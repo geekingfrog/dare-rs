@@ -504,15 +504,15 @@ mod test {
     #[test]
     fn test_typeof() {
         let expr = dare::StructParser::new()
-            .parse(Lexer::new(r#"struct Foo {"type": #[typeof(blah)]}"#))
+            .parse(Lexer::new(r#"struct Foo {"type": #[typeof("blah")]}"#))
             .unwrap();
         let expected = Struct {
-            location: loc((1,1), (1,37)),
+            location: loc((1,1), (1,39)),
             name: "Foo".to_string(),
             type_parameters: vec![],
             fields: vec![
                 Field{
-                    location: loc((1, 13), (1,36)),
+                    location: loc((1, 13), (1,38)),
                     name: "type".to_string(),
                     typ: FieldType::TypeOf("blah".to_string()),
                 }
