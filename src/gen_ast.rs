@@ -198,10 +198,14 @@ impl ast::TopDeclaration {
 
 impl ast::Struct {
     fn to_gen_ast(&self, mappings: &Mappings) -> Result<Struct> {
-        let type_mappings: TypeMappings = self.fields.iter().filter_map(|f| match &f.typ {
-            ast::FieldType::TypeOf(s) => Some((f.name.as_ref(), s.as_ref())),
-            ast::FieldType::Type(_) => None,
-        }).collect();
+        let type_mappings: TypeMappings = self
+            .fields
+            .iter()
+            .filter_map(|f| match &f.typ {
+                ast::FieldType::TypeOf(s) => Some((f.name.as_ref(), s.as_ref())),
+                ast::FieldType::Type(_) => None,
+            })
+            .collect();
 
         for (type_of_name, target_field_name) in type_mappings.iter() {
             let found = self.fields.iter().find(|f| &f.name == target_field_name);
@@ -248,9 +252,10 @@ impl ast::Enum {
 
 impl ast::Field {
     fn to_gen_ast(&self, mappings: &Mappings, type_mappings: &TypeMappings) -> Result<Field> {
-        let variant_hint = type_mappings.iter().find(|(_typeof_field_name, target)| {
-            **target == self.name
-        }).map(|(field_name, _)| (*field_name).to_string());
+        let variant_hint = type_mappings
+            .iter()
+            .find(|(_typeof_field_name, target)| **target == self.name)
+            .map(|(field_name, _)| (*field_name).to_string());
 
         Ok(Field {
             location: self.location,
@@ -356,5 +361,37 @@ impl From<&ast::AtomicType> for AtomicType {
             ast::AtomicType::Bool => AtomicType::Bool,
             ast::AtomicType::Bytes => AtomicType::Bytes,
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::dare;
+    use crate::lexer::Lexer;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn variant_hint() {
+        let decls = dare::TopDeclarationsParser::new()
+            .parse(Lexer::new(
+                "struct Bar {f: Int}\nstruct Foo {\"type\": #[typeof(\"payload\")], payload: Bar}",
+            ))
+            .unwrap();
+
+        let exprs = from_parse_ast(decls).unwrap();
+
+        match &exprs[1] {
+            TopDeclaration::Struct(s) => match &s.fields[1].typ {
+                FieldType::Type(Type::Reference(r)) => {
+                    assert_eq!(Some("type".to_string()), r.variant_hint);
+                }
+                x => assert!(false, format!(
+                    "mismatched type, expected a reference but got {:?}",
+                    x
+                )),
+            },
+            x => assert!(false, "expected struct but got {:?}", x),
+        };
     }
 }
