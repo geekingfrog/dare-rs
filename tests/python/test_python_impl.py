@@ -43,6 +43,7 @@ def test_simple_sum_ctors() -> None:
     )
 
 
-# def test_typeof_automatically_set() -> None:
-#     resp = typeof.Response(result=typeof.Ok("all is well"))
-#     assert resp.to_json() == {"result": "all is well", "response_type": "ok"}
+def test_typeof_automatically_set() -> None:
+    # resp = typeof.Response(result=typeof.Ok("all is well"), response_type="ok")
+    resp = typeof.Response(result=typeof.Ok("all is well"))
+    assert resp.to_json() == {"result": "all is well", "response_type": "ok"}

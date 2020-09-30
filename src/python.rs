@@ -97,14 +97,21 @@ fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct) -> Vec<PyToken> {
     tokens.push(PyToken::NewLine);
 
     let mut body = vec![];
+
+    // Generate the class attribute with their type
+    // Exclude #[typeof] fields
     body.extend(intersperce(
         PyToken::NewLine,
         s.fields
             .iter()
-            .map(|f| {
+            .filter_map(|f| match &f.typ {
+                FieldType::TypeOf(_) => None,
+                FieldType::Type(t) => Some((&f.name, t)),
+            })
+            .map(|(name, typ)| {
                 typed_attr(
-                    &f.name.to_snake_case(),
-                    vec![f.typ.get_python_type(&gen_ctx).into()],
+                    &name.to_snake_case(),
+                    vec![typ.get_python_type(&gen_ctx).into()],
                     None,
                 )
             })
@@ -183,6 +190,12 @@ fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct) -> Vec<PyToken> {
     from_json_body.push(PyToken::NewLine);
 
     for field in &s.fields {
+        // skip #[typeof] fields, generate @properties field for that
+        match field.typ {
+            FieldType::TypeOf(_) => continue,
+            FieldType::Type(_) => (),
+        };
+
         from_json_body.push(py_try(
             format!(
                 "{} = {}",
@@ -215,7 +228,10 @@ fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct) -> Vec<PyToken> {
     let args: Vec<PyToken> = s
         .fields
         .iter()
-        .map(|f| format!("{}", f.name).into())
+        .filter_map(|f| match f.typ {
+            FieldType::TypeOf(_) => None,
+            FieldType::Type(_) => Some(format!("{}", f.name).into()),
+        })
         .collect();
     from_json_body.extend(intersperce(", ".into(), args));
     from_json_body.push(")".into());
@@ -230,6 +246,27 @@ fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct) -> Vec<PyToken> {
     body.push(PyToken::NewLine);
     body.extend(from_json);
     body.push(PyToken::NewLine);
+
+    // Generate a @property function for each #[typeof] field
+    for (field_name, hint_target) in &s
+        .fields
+        .iter()
+        .filter_map(|f| match &f.typ {
+            FieldType::TypeOf(target) => Some((&f.name, target)),
+            FieldType::Type(_) => None,
+        })
+        .collect::<Vec<_>>()
+    {
+        body.push("@property".into());
+        body.push(PyToken::NewLine);
+        body.extend(py_fn(
+            field_name,
+            vec!["self".into()],
+            vec![format!("return self.{}.json_type", hint_target).into()],
+            Some("str".into()),
+        ));
+        body.push(PyToken::NewLine)
+    }
 
     body.extend(py_fn(
         "to_json",
@@ -486,7 +523,17 @@ impl PythonJSON for Type {
             Type::Reference(r) => {
                 let referenced_decl = r.target.as_ref();
                 if depth == 0 {
-                    format!("{}.from_json({})", referenced_decl.get_name(), name)
+                    // variant hint only make sense for the first level. It isn't possible to
+                    // have #[typeof] refer to things other than Referenced type
+                    match &r.variant_hint {
+                        Some(hint) => format!(
+                            r#"{}.from_json({}, tag=data.get("{}"))"#,
+                            referenced_decl.get_name(),
+                            name,
+                            hint
+                        ),
+                        None => format!("{}.from_json({})", referenced_decl.get_name(), name),
+                    }
                 } else {
                     format!("{}.from_json", referenced_decl.get_name(),)
                 }
@@ -899,6 +946,9 @@ fn gen_enum_variant(
         &directives,
     ));
 
+    class_body.push(gen_json_type_enum_variant(variant));
+    tokens.push(PyToken::NewLine);
+
     class_body.push(gen_to_json_enum_variant(
         &gen_ctx,
         &variant,
@@ -912,6 +962,26 @@ fn gen_enum_variant(
     tokens.extend(py_class(&variant.name.to_pascal_case(), vec![], class_body));
 
     (td_name, PyToken::Block(tokens))
+}
+
+/// generate the property to get the json tag for this variant
+fn gen_json_type_enum_variant(variant: &EnumVariant) -> PyToken {
+    let mut tokens = vec!["@property".into(), PyToken::NewLine];
+
+    let tag_val = variant.alias.as_ref().unwrap_or(&variant.name);
+    tokens.extend(py_fn(
+        "json_type",
+        vec!["self".into()],
+        vec![
+            r#""Returns the json tag for this variant.""#.into(),
+            PyToken::NewLine,
+            format!(r#"return "{}""#, tag_val).into(),
+        ],
+        Some("str".into()),
+    ));
+    tokens.push(PyToken::NewLine);
+
+    PyToken::Block(tokens)
 }
 
 /// name and tokens to describe the return type of .to_json()

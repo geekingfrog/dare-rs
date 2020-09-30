@@ -26,6 +26,14 @@
           "result": 2,
           "response_type": "ok"
         }
+      },
+      {
+        "description": "typeof tag must be valid",
+        "valid": false,
+        "data": {
+          "result": 2,
+          "response_type": "tag doesn't exist"
+        }
       }
     ]
   }

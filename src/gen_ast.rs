@@ -248,9 +248,9 @@ impl ast::Enum {
 
 impl ast::Field {
     fn to_gen_ast(&self, mappings: &Mappings, type_mappings: &TypeMappings) -> Result<Field> {
-        let variant_hint = type_mappings.iter().find(|(mapping_name, _hint)| {
-            **mapping_name == self.name
-        }).map(|(_, hint)| (*hint).to_string());
+        let variant_hint = type_mappings.iter().find(|(_typeof_field_name, target)| {
+            **target == self.name
+        }).map(|(field_name, _)| (*field_name).to_string());
 
         Ok(Field {
             location: self.location,
@@ -316,7 +316,7 @@ impl ast::Type {
                         name: r.name.clone(),
                         type_parameters: params?,
                         target: (*target).clone(),
-                        variant_hint: None, // TODO
+                        variant_hint,
                     }))
                 }),
             ast::Type::Builtin(b) => {
