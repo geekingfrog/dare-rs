@@ -13,9 +13,10 @@ class ValidationError(Exception):
         super().__init__(message)
 
 
-T = TypeVar("T")
-K = TypeVar("K")
-V = TypeVar("V")
+# typevars are produced by the caller
+# T = TypeVar("T")
+# K = TypeVar("K")
+# V = TypeVar("V")
 
 
 def parse_primitive(prim_type: Union[type, Tuple[type, ...]], msg: str, x: Any) -> V:
@@ -161,3 +162,6 @@ def dump_list(dump_item: Callable[[T], Any], v: List[T]) -> List[Any]:
 
 def dump_object(dump_item: Callable[[T], Any], d: Dict[str, T]) -> Dict[str, Any]:
     return {k: dump_item(v) for k, v in d.items()}
+
+def identity(x: T) -> T:
+    return x

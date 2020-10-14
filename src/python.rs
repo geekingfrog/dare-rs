@@ -17,6 +17,7 @@ pub fn gen_python(decls: &[gen_ast::TopDeclaration]) -> Vec<PyToken> {
         .iter()
         .map(|decl| PyToken::Block(gen_python_top_decl(&mut gen_ctx, decl)))
         .collect();
+
     let imports = py_imports(gather_imports(&code_tokens));
     let mut tokens = vec![];
     tokens.push(imports);
@@ -25,12 +26,18 @@ pub fn gen_python(decls: &[gen_ast::TopDeclaration]) -> Vec<PyToken> {
     tokens.extend(intersperce(PyToken::NewLine, code_tokens));
 
     tokens.push(PyToken::NewLine);
-    if let Some(n) = gen_ctx.tuple_arities.iter().max() {
-        tokens.push(gen_type_vars(*n));
+    if let Some(n) = gen_ctx.tuple_arities.clone().iter().max() {
+        tokens.push(gen_tuple_typevars(&mut gen_ctx, *n));
         tokens.push(PyToken::NewLine);
     }
-    for n in gen_ctx.tuple_arities {
-        tokens.push(gen_tuple_parser(n));
+
+    for n in gen_ctx.tuple_arities.iter() {
+        tokens.push(gen_tuple_parser(*n));
+    }
+
+    tokens.push(PyToken::NewLine);
+    for tv in vec!["T", "K", "V"].into_iter() {
+        tokens.push(gen_type_var(&mut gen_ctx, tv));
     }
 
     tokens.push(PyToken::NewLine);
@@ -54,6 +61,13 @@ struct GenCtx<'decls> {
     tuple_arities: BTreeSet<u8>,
 
     top_declarations: &'decls [TopDeclaration],
+
+    /// Keep track of type variables for mypy so they are not redeclared
+    type_variables: BTreeSet<String>,
+
+    /// Same thing but for the type alias for the various polymorphic from_json
+    /// for example: `JSON_T = Tuple[Callable[[Any], T], Callable[[T], Any]]`
+    generic_json_types: BTreeSet<String>,
 }
 
 impl<'decls> GenCtx<'decls> {
@@ -61,6 +75,8 @@ impl<'decls> GenCtx<'decls> {
         GenCtx {
             tuple_arities: BTreeSet::new(),
             top_declarations: decls,
+            type_variables: BTreeSet::new(),
+            generic_json_types: BTreeSet::new(),
         }
     }
 }
@@ -69,7 +85,7 @@ fn gen_python_top_decl(mut gen_ctx: &mut GenCtx, decl: &gen_ast::TopDeclaration)
     let mut tokens = Vec::new();
 
     let decl_tokens = match decl {
-        TopDeclaration::Struct(s) => gen_py_struct(&gen_ctx, s),
+        TopDeclaration::Struct(s) => gen_py_struct(&mut gen_ctx, s),
         TopDeclaration::Enum(e) => gen_py_enum(&mut gen_ctx, e),
         TopDeclaration::Alias(a) => gen_py_alias(a),
     };
@@ -79,22 +95,65 @@ fn gen_python_top_decl(mut gen_ctx: &mut GenCtx, decl: &gen_ast::TopDeclaration)
     tokens
 }
 
-fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct) -> Vec<PyToken> {
+fn gen_py_struct(mut gen_ctx: &mut GenCtx, s: &Struct) -> Vec<PyToken> {
     let mut tokens = Vec::new();
-    let td = PyToken::Import(try_import("TypedDict", "typing", "typing_extensions"), None);
-
     let struct_td_name = format!("{}JSON", s.name);
-    let struct_td_attrs = intersperce(
-        PyToken::NewLine,
-        s.fields
-            .iter()
-            .map(|f| typed_attr(&f.name, vec![f.typ.get_json_type(&gen_ctx).into()], None))
-            .collect(),
-    );
-    let struct_td = py_class(&struct_td_name, vec![td], struct_td_attrs);
-    tokens.extend(struct_td);
 
-    tokens.push(PyToken::NewLine);
+    // Generate the typed dict to define the result of to_json
+    // but mypy doesn't support generic typed dicts so only do that
+    // for non polymorphic stucts
+    // https://github.com/python/mypy/issues/3863
+    if s.type_parameters.is_empty() {
+        let td = PyToken::Import(try_import("TypedDict", "typing", "typing_extensions"), None);
+        let struct_td_attrs = intersperce(
+            PyToken::NewLine,
+            s.fields
+                .iter()
+                .map(|f| typed_attr(&f.name, vec![f.typ.get_json_type(&gen_ctx).into()], None))
+                .collect(),
+        );
+        let struct_td = py_class(&struct_td_name, vec![td], struct_td_attrs);
+        tokens.extend(struct_td);
+        tokens.push(PyToken::NewLine);
+    } else {
+        // For the moment, just output a simple alias
+        tokens.push(format!("{}JSON = ", s.name).into());
+        tokens.push(type_import("Any"));
+        tokens.push(PyToken::NewLine);
+
+        // also, generate the type alias for the tuples (from_json, to_json)
+        // required for the `from_json` class methods
+        // For example:
+        // JSON_T = Tuple[Callable[[Any], T], Callable[[T], Any]]
+        for tv in s.type_parameters.iter() {
+            if !gen_ctx.generic_json_types.contains(tv) {
+                gen_ctx.generic_json_types.insert(tv.clone());
+
+                tokens.push(format!("{} = ", tv).into());
+                tokens.push(type_import("TypeVar"));
+                tokens.push(format!("(\"{}\")", tv).into());
+                tokens.push(PyToken::NewLine);
+                // K = TypeVar("K")
+
+                tokens.push(format!("JSON_{} = ", tv).into());
+                tokens.push(type_import("Tuple"));
+                tokens.push("[".into());
+
+                tokens.push(type_import("Callable"));
+                tokens.push("[[".into());
+                tokens.push(type_import("Any"));
+                tokens.push(format!("], {}], ", tv).into());
+
+                tokens.push(type_import("Callable"));
+                tokens.push(format!("[[{}], ", tv).into());
+                tokens.push(type_import("Any"));
+                tokens.push("]".into());
+
+                tokens.push("]".into());
+                tokens.push(PyToken::NewLine);
+            }
+        }
+    }
 
     let mut body = vec![];
 
@@ -117,52 +176,35 @@ fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct) -> Vec<PyToken> {
             })
             .collect(),
     ));
+
     body.push(PyToken::NewLine);
+
+    // Add all _dump_T fields to serialize the corresponding generic type
+    body.extend(intersperce(
+        PyToken::NewLine,
+        s.type_parameters
+            .iter()
+            .map(|tv| {
+                typed_attr(
+                    &format!("_dump_{}", tv),
+                    vec![PyToken::Block(vec![
+                        type_import("Callable"),
+                        format!("[[{}], ", tv).into(),
+                        type_import("Any"),
+                        "] = ".into(),
+                        PyToken::Import(
+                            PyImport::Full("dataclasses".to_string()),
+                            Some("field".to_string()),
+                        ),
+                        format!("(repr=False)").into(),
+                    ])],
+                    None,
+                )
+            })
+            .collect(),
+    ));
+
     body.push(PyToken::NewLine);
-
-    let mut init_args = vec!["self".into()];
-    init_args.extend(s.fields.iter().map(|f| {
-        let tok = match &f.typ {
-            FieldType::TypeOf(_) => "Optional[str]".into(),
-            FieldType::Type(t) => {
-                Type::Builtin(Builtin::Optional(Box::new(unpack_optional(t.clone()))))
-                    .to_py_token(&gen_ctx)
-            }
-        };
-
-        typed_attr(&f.name.to_snake_case(), vec![tok], None)
-    }));
-
-    let mut init_body = vec![];
-    init_body.push("errors = {}".into());
-    init_body.push(PyToken::NewLine);
-
-    for field in &s.fields {
-        let name = &field.name.to_snake_case();
-        init_body.push(PyToken::NewLine);
-
-        init_body.push("try:".into());
-        init_body.push(indent(1));
-        let parse_fn = &field.typ.get_parse_function(&gen_ctx, &name, 0);
-        init_body.push(format!("self.{} = {}", name, parse_fn).into());
-        init_body.push(indent(-1));
-        init_body.push("except ValidationError as e:".into());
-        init_body.push(indent(1));
-        init_body.push(format!("errors[\"{}\"] = e.messages", name).into());
-        init_body.push(indent(-1));
-    }
-
-    init_body.push(PyToken::NewLine);
-    init_body.push(
-        If::new(
-            "errors".into(),
-            "raise ValidationError(message=errors)".into(),
-        )
-        .into(),
-    );
-
-    let init = py_fn("__init__", init_args, init_body, Some("None".into()));
-    // body.extend(init);
     body.push(PyToken::NewLine);
 
     let any = type_import("Any");
@@ -170,6 +212,15 @@ fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct) -> Vec<PyToken> {
         PyImport::Full("collections".to_owned()),
         Some("abc.Mapping".to_owned()),
     );
+
+    // vec!["cls".into(), typed_attr("data", vec![any], None)],
+    let mut from_json_args = vec!["cls".into()];
+    from_json_args.extend(
+        s.type_parameters
+            .iter()
+            .map(|tv| format!("json_{}: JSON_{}[{}]", tv, tv, tv).into()),
+    );
+    from_json_args.push(typed_attr("data", vec![any], None));
 
     let mut from_json_body = vec![];
 
@@ -184,6 +235,15 @@ fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct) -> Vec<PyToken> {
         )
         .into(),
     );
+    from_json_body.push(PyToken::NewLine);
+
+    // unpack the {to,from}_json functions passed as argument
+    from_json_body.extend(s.type_parameters.iter().map(|tv| {
+        PyToken::Block(vec![
+            format!("parse_{}, dump_{} = json_{}", tv, tv, tv).into(),
+            PyToken::NewLine,
+        ])
+    }));
 
     from_json_body.push("errors = {}".into());
     from_json_body.push(PyToken::NewLine);
@@ -196,10 +256,13 @@ fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct) -> Vec<PyToken> {
             FieldType::Type(_) => (),
         };
 
-        from_json_body.push(py_try(
+        // TODO: perhaps only put the type hint when there are generics involved
+        // in this case they are required for mypy not to get confused
+        let try_body = PyToken::Block(vec![
+            format!("{}: ", field.name).into(),
+            field.typ.get_python_type(&gen_ctx),
             format!(
-                "{} = {}",
-                field.name,
+                " = {}",
                 field.typ.get_parse_function(
                     &gen_ctx,
                     &format!(r#"data.get("{}")"#, field.name),
@@ -207,6 +270,9 @@ fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct) -> Vec<PyToken> {
                 )
             )
             .into(),
+        ]);
+        from_json_body.push(py_try(
+            try_body,
             vec![(
                 "ValidationError as e".into(),
                 format!(r#"errors["{}"] = e.messages"#, field.name).into(),
@@ -225,7 +291,7 @@ fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct) -> Vec<PyToken> {
 
     from_json_body.push(PyToken::NewLine);
     from_json_body.push("return cls(".into());
-    let args: Vec<PyToken> = s
+    let mut args: Vec<PyToken> = s
         .fields
         .iter()
         .filter_map(|f| match f.typ {
@@ -233,14 +299,29 @@ fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct) -> Vec<PyToken> {
             FieldType::Type(_) => Some(format!("{}", f.name).into()),
         })
         .collect();
+    args.extend(
+        s.type_parameters
+            .iter()
+            .map(|tv| format!("dump_{}", tv).into()),
+    );
     from_json_body.extend(intersperce(", ".into(), args));
     from_json_body.push(")".into());
 
+    let (from_json_name, from_json_result) = if s.type_parameters.is_empty() {
+        ("from_json", format!("\"{}\"", s.name).into())
+    } else {
+        let type_params = s.type_parameters.join(", ");
+        (
+            "_from_json",
+            format!("\"{}[{}]\"", s.name, type_params).into(),
+        )
+    };
     let from_json = py_fn(
-        "from_json",
-        vec!["cls".into(), typed_attr("data", vec![any], None)],
+        from_json_name,
+        from_json_args,
+        // vec!["cls".into(), typed_attr("data", vec![any], None)],
         from_json_body,
-        Some(format!("\"{}\"", s.name).into()),
+        Some(from_json_result),
     );
     body.push("@classmethod".into());
     body.push(PyToken::NewLine);
@@ -268,6 +349,13 @@ fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct) -> Vec<PyToken> {
         body.push(PyToken::NewLine)
     }
 
+    let to_json_return_type = if s.type_parameters.is_empty() {
+        struct_td_name.into()
+    } else {
+        // mypy lack of generic typed dict
+        type_import("Any")
+    };
+
     body.extend(py_fn(
         "to_json",
         vec!["self".into()],
@@ -281,19 +369,30 @@ fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct) -> Vec<PyToken> {
                     .map(|f| {
                         let name = f.name.to_snake_case();
                         let attr = format!("self.{}", &name.to_snake_case());
-                        format!(
+                        let result = format!(
                             r#""{}": {},"#,
                             f.name,
                             &f.typ.get_dump_function(&gen_ctx, &attr, 0).unwrap_or(attr)
                         )
-                        .into()
+                        .into();
+                        if f.typ.is_generic_type() {
+                            return PyToken::Block(vec![
+                                result,
+                                // mypy gets mighty confused when assigning attribute which are Callable
+                                // and errors with "Too many arguments"
+                                // https://github.com/python/mypy/issues/2427
+                                "  # type: ignore".into(),
+                            ]);
+                        } else {
+                            result
+                        }
                     })
                     .collect(),
             )),
             indent(-1),
             "}".into(),
         ],
-        Some(struct_td_name.into()),
+        Some(to_json_return_type),
     ));
 
     tokens.push(PyToken::NewLine);
@@ -305,7 +404,26 @@ fn gen_py_struct(gen_ctx: &GenCtx, s: &Struct) -> Vec<PyToken> {
     tokens.push(dataclass);
     tokens.push(PyToken::NewLine);
 
-    let struct_class = py_class(&s.name, vec![], body);
+    let class_generics = if s.type_parameters.is_empty() {
+        vec![]
+    } else {
+        vec![PyToken::Block(vec![
+            type_import("Generic"),
+            "[".into(),
+            PyToken::Block(intersperce(
+                ",".into(),
+                s.type_parameters
+                    .iter()
+                    .map(|tv| {
+                        gen_ctx.type_variables.insert(tv.to_string());
+                        format!("{}", tv).into()
+                    })
+                    .collect(),
+            )),
+            "]".into(),
+        ])]
+    };
+    let struct_class = py_class(&s.name, class_generics, body);
     tokens.extend(struct_class);
 
     tokens
@@ -472,7 +590,7 @@ impl PythonJSON for Type {
                     }
                 }
             },
-            Type::Reference(_r) => {
+            Type::Reference(r) => {
                 // let referenced_decl = &gen_ctx.top_declarations[r.name];
                 // TODO check if the referenced top declaration is an alias. In this case
                 // simply calling to_json on it will not work
@@ -480,6 +598,13 @@ impl PythonJSON for Type {
                     Some(format!("{}.to_json()", name))
                 } else {
                     Some("lambda x: x.to_json()".to_owned())
+                }
+            }
+            Type::TypeParameter(tv) => {
+                if depth == 0 {
+                    Some(format!("dump_{}({})", tv, name))
+                } else {
+                    Some(format!("lambda x: dump_{}(x)", tv))
                 }
             }
         }
@@ -522,20 +647,70 @@ impl PythonJSON for Type {
             },
             Type::Reference(r) => {
                 let referenced_decl = r.target.as_ref();
-                if depth == 0 {
-                    // variant hint only make sense for the first level. It isn't possible to
-                    // have #[typeof] refer to things other than Referenced type
-                    match &r.variant_hint {
-                        Some(hint) => format!(
-                            r#"{}.from_json({}, tag=data.get("{}"))"#,
-                            referenced_decl.get_name(),
-                            name,
-                            hint
-                        ),
-                        None => format!("{}.from_json({})", referenced_decl.get_name(), name),
+                if r.type_parameters.is_empty() {
+                    if depth == 0 {
+                        // variant hint only make sense for the first level. It isn't possible to
+                        // have #[typeof] refer to things other than Referenced type
+                        match &r.variant_hint {
+                            Some(hint) => format!(
+                                r#"{}.from_json({}, tag=data.get("{}"))"#,
+                                referenced_decl.get_name(),
+                                name,
+                                hint
+                            ),
+                            None => format!("{}.from_json({})", referenced_decl.get_name(), name),
+                        }
+                    } else {
+                        format!("{}.from_json", referenced_decl.get_name(),)
                     }
                 } else {
-                    format!("{}.from_json", referenced_decl.get_name(),)
+                    let parse_typevar_tuples = r
+                        .type_parameters
+                        .iter()
+                        .map(|tv| {
+                            format!(
+                                "({}, {})",
+                                // name is irrelevant since the depth is always 1
+                                tv.get_parse_function(&gen_ctx, "", 1),
+                                tv.get_dump_function(&gen_ctx, "", 1)
+                                    .unwrap_or("identity".to_string())
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+
+                    if depth == 0 {
+                        match &r.variant_hint {
+                            Some(hint) => format!(
+                                r#"{}._from_json({}, {}, tag=data.get("{}"))"#,
+                                referenced_decl.get_name(),
+                                parse_typevar_tuples,
+                                name,
+                                hint
+                            ),
+                            None => format!(
+                                "{}._from_json({}, {})",
+                                referenced_decl.get_name(),
+                                parse_typevar_tuples,
+                                name
+                            ),
+                        }
+                    } else {
+                        format!(
+                            "lambda x{}: {}._from_json({}, x{})",
+                            depth,
+                            referenced_decl.get_name(),
+                            parse_typevar_tuples,
+                            depth
+                        )
+                    }
+                }
+            }
+            Type::TypeParameter(tv) => {
+                if depth == 0 {
+                    format!("parse_{}({})", tv, name)
+                } else {
+                    format!("parse_{}", tv)
                 }
             }
         }
@@ -544,7 +719,23 @@ impl PythonJSON for Type {
     fn get_python_type(&self, gen_ctx: &GenCtx) -> PyToken {
         match self {
             Type::Atomic(at) => atomic_py_instance(at).0.into(),
-            Type::Reference(r) => r.target.get_py_python_type().into(),
+            Type::Reference(r) => {
+                if r.type_parameters.is_empty() {
+                    r.target.get_py_python_type().into()
+                } else {
+                    let mut params = vec![r.target.get_py_python_type().into()];
+                    params.push("[".into());
+                    params.extend(intersperce(
+                        ", ".into(),
+                        r.type_parameters
+                            .iter()
+                            .map(|tv| tv.get_python_type(&gen_ctx))
+                            .collect(),
+                    ));
+                    params.push("]".into());
+                    PyToken::Block(params)
+                }
+            }
             Type::Builtin(b) => match b {
                 Builtin::List(inner) => {
                     let list = type_import("List");
@@ -576,6 +767,8 @@ impl PythonJSON for Type {
                     ])
                 }
             },
+
+            Type::TypeParameter(tv) => tv[..].into(),
         }
     }
 
@@ -609,6 +802,7 @@ impl PythonJSON for Type {
                 ),
             },
             Type::Reference(r) => r.target.get_py_json_type(),
+            Type::TypeParameter(tv) => tv.clone(),
         }
     }
 }
@@ -1306,16 +1500,17 @@ fn gen_to_json_enum_variant(
     ))
 }
 
-fn gen_type_vars(n: u8) -> PyToken {
+fn gen_tuple_typevars(mut gen_ctx: &mut GenCtx, n: u8) -> PyToken {
     let mut tokens = vec![];
-    let tv = PyToken::Import(
-        PyImport::Specific("typing".to_owned(), "TypeVar".to_owned()),
-        None,
-    );
+    // let tv = PyToken::Import(
+    //     PyImport::Specific("typing".to_owned(), "TypeVar".to_owned()),
+    //     None,
+    // );
     for i in 1..=n {
-        tokens.push(format!("T{} = ", i).into());
-        tokens.push(tv.clone());
-        tokens.push(format!(r#"("T{}")"#, i).into());
+        tokens.push(gen_type_var(&mut gen_ctx, &format!("T{}", i)));
+        // tokens.push(format!("T{} = ", i).into());
+        // tokens.push(tv.clone());
+        // tokens.push(format!(r#"("T{}")"#, i).into());
         tokens.push(PyToken::NewLine);
     }
 
@@ -1478,6 +1673,7 @@ fn render(conf: &PyConfig, mut ctx: &mut FormatContext, tokens: &[PyToken]) -> S
             PyToken::Block(toks) => {
                 buf.push(render(&conf, &mut ctx, &toks));
             }
+            PyToken::Empty => continue,
         }
     }
     buf.join("")
@@ -1536,6 +1732,10 @@ pub enum PyToken {
     /// The translation into tabs/whitespace is done when turning tokens into string
     Indent(i8),
     Block(Vec<PyToken>),
+
+    /// can be useful when something must produce a token but there is
+    /// no code to generate
+    Empty,
 }
 
 impl From<String> for PyToken {
@@ -1568,6 +1768,7 @@ impl From<Type> for PyToken {
                 Builtin::Optional(ot) => typed_optional((*ot).into()),
                 Builtin::Map(kt, vt) => typed_dict((*kt).into(), (*vt).into()),
             },
+            Type::TypeParameter(_tv) => todo!("From<Type> for PyToken for type parameter"),
         }
     }
 }
@@ -1592,11 +1793,15 @@ impl Type {
                 }
             }
             Type::Builtin(b) => match b {
-                Builtin::List(t) => {
-                    PyToken::Block(vec!["List[".into(), (*t).to_py_token(&gen_ctx), "]".into()])
-                }
+                Builtin::List(t) => PyToken::Block(vec![
+                    type_import("List"),
+                    "[".into(),
+                    (*t).to_py_token(&gen_ctx),
+                    "]".into(),
+                ]),
                 Builtin::Optional(t) => PyToken::Block(vec![
-                    "Optional[".into(),
+                    type_import("Optional"),
+                    "[".into(),
                     (*t).to_py_token(&gen_ctx),
                     "]".into(),
                 ]),
@@ -1612,6 +1817,7 @@ impl Type {
                     ])
                 }
             },
+            Type::TypeParameter(tv) => format!("{}", tv).into(),
         }
     }
 }
@@ -1848,6 +2054,21 @@ fn typed_optional(typ: PyToken) -> PyToken {
 fn type_import(typ: &str) -> PyToken {
     let typ = PyImport::Specific("typing".to_owned(), typ.to_owned());
     PyToken::Import(typ, None)
+}
+
+/// Optionally output a token for a TypeVar definition
+fn gen_type_var(gen_ctx: &mut GenCtx, tv: &str) -> PyToken {
+    if gen_ctx.type_variables.contains(tv) {
+        PyToken::Empty
+    } else {
+        gen_ctx.type_variables.insert(tv.to_string());
+        PyToken::Block(vec![
+            format!("{} = ", tv).into(),
+            type_import("TypeVar"),
+            format!("(\"{}\")", tv).into(),
+            PyToken::NewLine,
+        ])
+    }
 }
 
 fn py_try(block: PyToken, excepts: Vec<(PyToken, PyToken)>) -> PyToken {

@@ -72,7 +72,7 @@ pub struct Enum {
 pub struct Alias {
     pub location: SrcSpan,
     pub name: String,
-    pub alias: RefType,
+    pub alias: Type,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -90,14 +90,14 @@ pub enum VariantValue {
     StructCtor(Vec<Field>),
 }
 
-impl VariantValue {
-    pub fn is_only_ctor(&self) -> bool {
-        match &self {
-            VariantValue::OnlyCtor => true,
-            _ => false,
-        }
-    }
-}
+// impl VariantValue {
+//     pub fn is_only_ctor(&self) -> bool {
+//         match &self {
+//             VariantValue::OnlyCtor => true,
+//             _ => false,
+//         }
+//     }
+// }
 
 /// A type can be atomic (String, Bool, Int…), a reference to another type
 /// (Foo, Bar<T>, Map<String, Int>), or a generic type like `T` or `errorType`.

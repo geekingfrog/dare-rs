@@ -294,23 +294,38 @@ mod test {
     }
 
     #[test]
-    fn type_alias_with_parameters() {
+    fn type_alias_with_atomic_type() {
         let expr = dare::AliasParser::new()
-            .parse(Lexer::new("type MyResult = Result<String, Int>"))
+            .parse(Lexer::new("type UserId String"))
             .unwrap();
         assert_eq!(
             expr,
             Alias {
-                location: loc((1, 1), (1, 36)),
+                location: loc((1, 1), (1, 19)),
+                name: "UserId".to_string(),
+                alias: Type::Atomic(AtomicType::Str)
+            }
+        );
+    }
+
+    #[test]
+    fn type_alias_with_parameters() {
+        let expr = dare::AliasParser::new()
+            .parse(Lexer::new("type MyResult Result<String, Int>"))
+            .unwrap();
+        assert_eq!(
+            expr,
+            Alias {
+                location: loc((1, 1), (1, 34)),
                 name: "MyResult".to_string(),
-                alias: RefType {
-                    location: loc((1, 17), (1, 36)),
+                alias: Type::Reference(RefType {
+                    location: loc((1, 15), (1, 34)),
                     name: "Result".to_string(),
                     type_parameters: vec![
                         Type::Atomic(AtomicType::Str),
                         Type::Atomic(AtomicType::Int),
                     ],
-                }
+                })
             }
         );
     }

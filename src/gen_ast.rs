@@ -1,6 +1,6 @@
 use anyhow::Result;
 /// AST used for code generation, as opposed to the parsing AST
-use std::{collections::BTreeMap, rc::Rc};
+use std::{collections::BTreeMap, collections::BTreeSet, rc::Rc};
 
 use crate::ast;
 use crate::lexer::SrcSpan;
@@ -77,6 +77,16 @@ pub enum FieldType {
     Type(Type),
 }
 
+impl FieldType {
+    pub fn is_generic_type(&self) -> bool {
+        match self {
+            FieldType::Type(Type::TypeParameter(_)) => true,
+            _ => false,
+        }
+    }
+
+}
+
 /// A type can be atomic (String, Bool, Int…), a reference to another type
 /// (Foo, Bar<T>, Map<String, Int>), or a generic type like `T` or `errorType`.
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -88,6 +98,8 @@ pub enum Type {
     Reference(RefType),
     /// Builtin type like List, Map and Optional
     Builtin(Builtin),
+    /// Type parameter, like T (in Foo<T>)
+    TypeParameter(String),
 }
 
 impl Enum {
@@ -170,6 +182,20 @@ impl VariantValue {
 
 type Mappings<'a> = BTreeMap<String, Rc<TopDeclaration>>;
 
+#[derive(Debug)]
+struct ConvertContext<'a> {
+    // map of all top declarations seen so far, used to resolve
+    // reference types
+    top_declaration_mappings: &'a BTreeMap<String, Rc<TopDeclaration>>,
+
+    // track the relationship between #[typeof(…)] declarations
+    // and other fields of the struct
+    type_mappings: Vec<(&'a str, &'a str)>,
+
+    // the list of in-scope type parameters
+    type_parameters: BTreeSet<String>,
+}
+
 // used to propagate information about #[typeof] fields
 // (field_name, target_name)
 // foo: #[typeof(bar)] => (foo, bar)
@@ -218,10 +244,11 @@ impl ast::Struct {
             }
         }
 
+        let type_params = self.type_parameters.iter().cloned().collect();
         let fields = self
             .fields
             .iter()
-            .map(|f| f.to_gen_ast(&mappings, &type_mappings))
+            .map(|f| f.to_gen_ast(&mappings, &type_mappings, &type_params))
             .collect::<Result<_>>();
 
         Ok(Struct {
@@ -235,10 +262,11 @@ impl ast::Struct {
 
 impl ast::Enum {
     fn to_gen_ast(&self, mappings: &Mappings) -> Result<Enum> {
+        let type_params = self.type_parameters.iter().cloned().collect();
         let variants = self
             .variants
             .iter()
-            .map(|v| v.to_gen_ast(&mappings))
+            .map(|v| v.to_gen_ast(&mappings, &type_params))
             .collect::<Result<_>>();
         Ok(Enum {
             location: self.location,
@@ -251,7 +279,12 @@ impl ast::Enum {
 }
 
 impl ast::Field {
-    fn to_gen_ast(&self, mappings: &Mappings, type_mappings: &TypeMappings) -> Result<Field> {
+    fn to_gen_ast(
+        &self,
+        mappings: &Mappings,
+        type_mappings: &TypeMappings,
+        type_params: &BTreeSet<String>,
+    ) -> Result<Field> {
         let variant_hint = type_mappings
             .iter()
             .find(|(_typeof_field_name, target)| **target == self.name)
@@ -260,39 +293,54 @@ impl ast::Field {
         Ok(Field {
             location: self.location,
             name: self.name.clone(),
-            typ: self.typ.to_gen_ast(&mappings, variant_hint)?,
+            typ: self.typ.to_gen_ast(&mappings, variant_hint, type_params)?,
         })
     }
 }
 
 impl ast::FieldType {
-    fn to_gen_ast(&self, mappings: &Mappings, variant_hint: Option<String>) -> Result<FieldType> {
+    fn to_gen_ast(
+        &self,
+        mappings: &Mappings,
+        variant_hint: Option<String>,
+        type_params: &BTreeSet<String>,
+    ) -> Result<FieldType> {
         match self {
             ast::FieldType::TypeOf(s) => Ok(FieldType::TypeOf(s.clone())),
-            ast::FieldType::Type(t) => t.to_gen_ast(&mappings, variant_hint).map(FieldType::Type),
+            ast::FieldType::Type(t) => t
+                .to_gen_ast(&mappings, variant_hint, type_params)
+                .map(FieldType::Type),
         }
     }
 }
 
 impl ast::EnumVariant {
-    fn to_gen_ast(&self, mappings: &Mappings) -> Result<EnumVariant> {
+    fn to_gen_ast(
+        &self,
+        mappings: &Mappings,
+        type_params: &BTreeSet<String>,
+    ) -> Result<EnumVariant> {
         Ok(EnumVariant {
             location: self.location,
             name: self.name.clone(),
             alias: self.alias.clone(),
-            value: self.value.to_gen_ast(&mappings)?,
+            value: self.value.to_gen_ast(&mappings, type_params)?,
         })
     }
 }
 
 impl ast::VariantValue {
-    fn to_gen_ast(&self, mappings: &Mappings) -> Result<VariantValue> {
+    fn to_gen_ast(
+        &self,
+        mappings: &Mappings,
+        type_params: &BTreeSet<String>,
+    ) -> Result<VariantValue> {
         match self {
             ast::VariantValue::OnlyCtor => Ok(VariantValue::OnlyCtor),
             ast::VariantValue::PositionalCtor(ctors) => {
                 let result = ctors
                     .iter()
-                    .map(|t| t.to_gen_ast(&mappings, None))
+                    .map(|t| t.to_gen_ast(&mappings, None, type_params))
                     .collect::<Result<_>>();
                 Ok(VariantValue::PositionalCtor(result?))
             }
@@ -302,39 +350,60 @@ impl ast::VariantValue {
 }
 
 impl ast::Type {
-    fn to_gen_ast(&self, mappings: &Mappings, variant_hint: Option<String>) -> Result<Type> {
+    fn to_gen_ast(
+        &self,
+        mappings: &Mappings,
+        variant_hint: Option<String>,
+        type_params: &BTreeSet<String>,
+    ) -> Result<Type> {
         match self {
             ast::Type::Atomic(t) => Ok(Type::Atomic(t.into())),
-            ast::Type::Reference(r) => mappings
-                .get(&r.name[..])
-                .ok_or(anyhow!("Reference {} not found", r.name).into())
-                .and_then(|target| {
-                    let params = r
-                        .type_parameters
-                        .iter()
-                        // no variant hints for type params
-                        .map(|t| t.to_gen_ast(&mappings, None))
-                        .collect::<Result<_>>();
+            ast::Type::Reference(r) => {
+                let ref_type = mappings
+                    .get(&r.name[..])
+                    // .ok_or(anyhow!("Reference {} not found", r.name).into())
+                    .and_then(|target| {
+                        let result = r
+                            .type_parameters
+                            .iter()
+                            // no variant hints for type params
+                            .map(|t| t.to_gen_ast(&mappings, None, type_params))
+                            .collect::<Result<_>>()
+                            .map(|params| {
+                                Type::Reference(RefType {
+                                    location: r.location,
+                                    name: r.name.clone(),
+                                    type_parameters: params,
+                                    target: (*target).clone(),
+                                    variant_hint,
+                                })
+                            });
 
-                    Ok(Type::Reference(RefType {
-                        location: r.location,
-                        name: r.name.clone(),
-                        type_parameters: params?,
-                        target: (*target).clone(),
-                        variant_hint,
-                    }))
-                }),
+                        Some(result)
+                    });
+
+                let type_param = if type_params.contains(&r.name) {
+                    Some(Ok(Type::TypeParameter(r.name.clone())))
+                } else {
+                    None
+                };
+
+                ref_type
+                    .or(type_param)
+                    .ok_or(anyhow!("{} is not a valid reference to an existing type nor a type parameter in scope."))?
+            }
+
             ast::Type::Builtin(b) => {
                 let b2 = match b {
                     ast::Builtin::List(inner) => {
-                        Builtin::List(Box::new(inner.to_gen_ast(mappings, None)?))
+                        Builtin::List(Box::new(inner.to_gen_ast(mappings, None, type_params)?))
                     }
-                    ast::Builtin::Optional(inner) => {
-                        Builtin::Optional(Box::new(inner.to_gen_ast(mappings, None)?))
-                    }
+                    ast::Builtin::Optional(inner) => Builtin::Optional(Box::new(
+                        inner.to_gen_ast(mappings, None, type_params)?,
+                    )),
                     ast::Builtin::Map(k, v) => Builtin::Map(
-                        Box::new(k.to_gen_ast(mappings, None)?),
-                        Box::new(v.to_gen_ast(mappings, None)?),
+                        Box::new(k.to_gen_ast(mappings, None, type_params)?),
+                        Box::new(v.to_gen_ast(mappings, None, type_params)?),
                     ),
                 };
                 Ok(Type::Builtin(b2))
@@ -386,10 +455,10 @@ mod test {
                 FieldType::Type(Type::Reference(r)) => {
                     assert_eq!(Some("type".to_string()), r.variant_hint);
                 }
-                x => assert!(false, format!(
-                    "mismatched type, expected a reference but got {:?}",
-                    x
-                )),
+                x => assert!(
+                    false,
+                    format!("mismatched type, expected a reference but got {:?}", x)
+                ),
             },
             x => assert!(false, "expected struct but got {:?}", x),
         };

@@ -30,6 +30,7 @@ pub TopDeclarations: Vec<TopDeclaration> = {
 pub TopDeclaration: TopDeclaration = {
   Struct => TopDeclaration::Struct(<>),
   Enum => TopDeclaration::Enum(<>),
+  Alias => TopDeclaration::Alias(<>),
 }
 
 pub Struct: Struct = {
@@ -53,7 +54,7 @@ pub Enum: Enum = {
 }
 
 pub Alias: Alias = {
-  <s:@L> "type" <name:Word> "=" <alias:RefType> <e:@L> => Alias {
+  <s:@L> "type" <name:Word> <alias:Type> <e:@L> => Alias {
     location: location(s, e),
     name: name.to_string(),
     alias,
