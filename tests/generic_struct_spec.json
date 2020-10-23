@@ -1,0 +1,32 @@
+{
+  "description": "generic struct",
+  "schema": "generic_struct.dare",
+  "tests": {
+    "FooInt": [
+      {
+        "description": "null data is invalid",
+        "valid": false,
+        "data": null
+      },
+      {
+        "description": "nested field must be valid type",
+        "valid": false,
+        "data": {
+          "field_int": {
+            "field_t": "not an int"
+          }
+        }
+      },
+      {
+        "description": "valid generic struct",
+        "valid": true,
+        "data": {
+          "field_int": {
+            "field_t": 42
+          }
+        }
+      }
+    ]
+  }
+}
+

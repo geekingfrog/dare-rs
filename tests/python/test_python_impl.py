@@ -1,5 +1,5 @@
 from dare.json_directives import EnumUnion, UnionSimple1, UnionString
-from dare import nested, typeof, simple_sum
+from dare import nested, typeof, simple_sum, generic_struct
 
 
 def test_first_variant() -> None:
@@ -44,6 +44,19 @@ def test_simple_sum_ctors() -> None:
 
 
 def test_typeof_automatically_set() -> None:
-    # resp = typeof.Response(result=typeof.Ok("all is well"), response_type="ok")
     resp = typeof.Response(result=typeof.Ok("all is well"))
     assert resp.to_json() == {"result": "all is well", "response_type": "ok"}
+
+
+def test_generic_struct() -> None:
+    # check that one can omit the _dump_T functions when constructing objects
+    # and everything still works
+    # TODO do the same for sum types
+    x = generic_struct.FooInt(field_int=generic_struct.Foo(2))
+    assert x.to_json() == {"field_int": {"field_t": 2}}
+
+    bar = generic_struct.Bar(["list", "of", "strings"], generic_struct.Foo(None))
+    assert bar.to_json() == {
+        "field_u": ["list", "of", "strings"],
+        "field_foo": {"field_t": None},
+    }

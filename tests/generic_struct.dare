@@ -1,0 +1,18 @@
+struct Foo<T> {
+  field_t: T
+}
+
+struct FooInt {
+  field_int: Foo<Int>
+}
+
+struct Bar<U, V> {
+  field_u: U,
+  field_foo: Foo<V?>,
+}
+
+struct Mono {
+  field_foo: Foo<Bytes>,
+  field_bar: Bar<Int, String>,
+  field_nested: Foo<List<Foo<Bool>>>,
+}

@@ -10,6 +10,7 @@ cargo run -- --schema ../references.dare --target-dir ./dare
 cargo run -- --schema ../json_directives.dare --target-dir ./dare
 cargo run -- --schema ../nested.dare --target-dir ./dare
 cargo run -- --schema ../typeof.dare --target-dir ./dare
+cargo run -- --schema ../generic_struct.dare --target-dir ./dare
 
 if [ ! -f ./venv/bin/pytest ]; then
   python -m venv venv

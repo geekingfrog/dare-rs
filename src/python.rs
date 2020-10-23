@@ -188,15 +188,17 @@ fn gen_py_struct(mut gen_ctx: &mut GenCtx, s: &Struct) -> Vec<PyToken> {
                 typed_attr(
                     &format!("_dump_{}", tv),
                     vec![PyToken::Block(vec![
+                        type_import("Optional"),
+                        "[".into(),
                         type_import("Callable"),
                         format!("[[{}], ", tv).into(),
                         type_import("Any"),
-                        "] = ".into(),
+                        "]] = ".into(),
                         PyToken::Import(
                             PyImport::Full("dataclasses".to_string()),
                             Some("field".to_string()),
                         ),
-                        format!("(repr=False)").into(),
+                        format!("(repr=False, default=None)").into(),
                     ])],
                     None,
                 )
@@ -356,10 +358,30 @@ fn gen_py_struct(mut gen_ctx: &mut GenCtx, s: &Struct) -> Vec<PyToken> {
         type_import("Any")
     };
 
+    let default_dump: Vec<PyToken> = s
+        .type_parameters
+        .iter()
+        .filter_map(|tv| {
+            s.fields.iter().find(|f| f.typ.is_typevar(tv)).map(|f| {
+                If::new(
+                    format!("self._dump_{} is None", tv).into(),
+                    format!(
+                        "self._dump_{} = get_dump_function(self.{})",
+                        tv,
+                        f.name.to_snake_case()
+                    )
+                    .into(),
+                )
+                .into()
+            })
+        })
+        .collect();
+
     body.extend(py_fn(
         "to_json",
         vec!["self".into()],
         vec![
+            PyToken::Block(default_dump),
             "return {".into(),
             indent(1),
             PyToken::Block(intersperce(
@@ -369,23 +391,12 @@ fn gen_py_struct(mut gen_ctx: &mut GenCtx, s: &Struct) -> Vec<PyToken> {
                     .map(|f| {
                         let name = f.name.to_snake_case();
                         let attr = format!("self.{}", &name.to_snake_case());
-                        let result = format!(
+                        format!(
                             r#""{}": {},"#,
                             f.name,
                             &f.typ.get_dump_function(&gen_ctx, &attr, 0).unwrap_or(attr)
                         )
-                        .into();
-                        if f.typ.is_generic_type() {
-                            return PyToken::Block(vec![
-                                result,
-                                // mypy gets mighty confused when assigning attribute which are Callable
-                                // and errors with "Too many arguments"
-                                // https://github.com/python/mypy/issues/2427
-                                "  # type: ignore".into(),
-                            ]);
-                        } else {
-                            result
-                        }
+                        .into()
                     })
                     .collect(),
             )),
@@ -601,8 +612,11 @@ impl PythonJSON for Type {
                 }
             }
             Type::TypeParameter(tv) => {
+                // depth == 0 is used for the .to_json() method
+                // while higher depths are used to construct the tuple
+                // (from_json, to_json) used in the `from_json` class method
                 if depth == 0 {
-                    Some(format!("dump_{}({})", tv, name))
+                    Some(format!("self._dump_{}({})", tv, name))
                 } else {
                     Some(format!("lambda x: dump_{}(x)", tv))
                 }
@@ -803,6 +817,16 @@ impl PythonJSON for Type {
             },
             Type::Reference(r) => r.target.get_py_json_type(),
             Type::TypeParameter(tv) => tv.clone(),
+        }
+    }
+}
+
+impl FieldType {
+    /// to test if a FieldType is exactly a given type parameter
+    fn is_typevar(&self, tv: &str) -> bool {
+        match &self {
+            FieldType::Type(Type::TypeParameter(x)) if x == tv => true,
+            _ => false,
         }
     }
 }

@@ -14,6 +14,7 @@ from dare import (
     json_directives,
     nested,
     typeof,
+    generic_struct,
 )
 from typing import Any, List, Tuple, TypedDict, cast
 
@@ -64,7 +65,8 @@ def gather_tests(specs_and_modules: List[Tuple[str, Any]]) -> List[Spec]:
             ("../references_spec.json", references),
             ("../json_directives_spec.json", json_directives),
             ("../nested_spec.json", nested),
-            # ("../typeof_spec.json", typeof),
+            ("../typeof_spec.json", typeof),
+            ("../generic_struct_spec.json", generic_struct),
         ]
     ),
     ids=itemgetter("description"),
@@ -79,10 +81,6 @@ def test_specs(test_spec: Spec) -> None:
     else:
         with pytest.raises(getattr(test_spec["module"], "ValidationError")):
             func(test["data"])
-
-
-# def test_reference_sum_type():
-#     references.
 
 
 def tuple_to_array(x: Any) -> Any:

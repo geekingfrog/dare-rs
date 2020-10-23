@@ -163,5 +163,41 @@ def dump_list(dump_item: Callable[[T], Any], v: List[T]) -> List[Any]:
 def dump_object(dump_item: Callable[[T], Any], d: Dict[str, T]) -> Dict[str, Any]:
     return {k: dump_item(v) for k, v in d.items()}
 
+
 def identity(x: T) -> T:
     return x
+
+
+def get_dump_function(x: T) -> Callable[[T], Any]:
+    """
+    return a function to convert a given type T into json through reflection
+    """
+    if x is None:
+        return identity
+
+    if hasattr(x, "to_json"):
+        return lambda x: x.to_json()  # type: ignore
+
+    if isinstance(x, list):
+        if not x:
+            return identity
+        # assume homogeneous lists, which is true for dare
+        dump_fn = get_dump_function(x[0])
+        return lambda x: dump_list(dump_fn, x)  # type: ignore
+
+    if isinstance(x, tuple):
+        if not x:
+            return identity
+        return lambda x: dump_list(lambda x1: get_dump_function(x1)(x1), x)  # type: ignore
+
+    if isinstance(x, collections.abc.Mapping):
+        if not x:
+            return identity
+        # assume all keys have the same type (true for dare)
+        dump = get_dump_function(x[next(iter(x))])
+        return lambda x: dump_object(lambda x2: dump(x2), x)  # type: ignore
+
+    if isinstance(x, bytes):
+        return dump_bytes  # type: ignore
+
+    return identity
