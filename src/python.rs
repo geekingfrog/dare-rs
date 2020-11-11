@@ -12,7 +12,7 @@ pub const SRC_PYTHON_PRELUDE: &'static str = include_str!("prelude.py");
 
 #[allow(dead_code)]
 pub fn gen_python(decls: &[gen_ast::TopDeclaration]) -> Vec<PyToken> {
-    let mut gen_ctx = GenCtx::new(decls);
+    let mut gen_ctx = GenContext::new(decls);
     let code_tokens: Vec<PyToken> = decls
         .iter()
         .map(|decl| PyToken::Block(gen_python_top_decl(&mut gen_ctx, decl)))
@@ -54,7 +54,7 @@ pub fn render_python(tokens: &[PyToken]) -> String {
 
 /// A struct used to gather various requirements while
 /// generating the code.
-struct GenCtx<'decls> {
+struct GenContext<'decls> {
     /// The code to parse tuple is very tedious to write manually and thus
     /// instead of putting that in the prelude, track which tuple arities
     /// are required. The parsing code will be generated on the fly
@@ -64,24 +64,22 @@ struct GenCtx<'decls> {
 
     /// Keep track of type variables for mypy so they are not redeclared
     type_variables: BTreeSet<String>,
-
-    /// Same thing but for the type alias for the various polymorphic from_json
-    /// for example: `JSON_T = Tuple[Callable[[Any], T], Callable[[T], Any]]`
-    generic_json_types: BTreeSet<String>,
 }
 
-impl<'decls> GenCtx<'decls> {
+impl<'decls> GenContext<'decls> {
     fn new(decls: &'decls [TopDeclaration]) -> Self {
-        GenCtx {
+        GenContext {
             tuple_arities: BTreeSet::new(),
             top_declarations: decls,
             type_variables: BTreeSet::new(),
-            generic_json_types: BTreeSet::new(),
         }
     }
 }
 
-fn gen_python_top_decl(mut gen_ctx: &mut GenCtx, decl: &gen_ast::TopDeclaration) -> Vec<PyToken> {
+fn gen_python_top_decl(
+    mut gen_ctx: &mut GenContext,
+    decl: &gen_ast::TopDeclaration,
+) -> Vec<PyToken> {
     let mut tokens = Vec::new();
 
     let decl_tokens = match decl {
@@ -95,65 +93,64 @@ fn gen_python_top_decl(mut gen_ctx: &mut GenCtx, decl: &gen_ast::TopDeclaration)
     tokens
 }
 
-fn gen_py_struct(mut gen_ctx: &mut GenCtx, s: &Struct) -> Vec<PyToken> {
+fn gen_py_struct(mut gen_ctx: &mut GenContext, s: &Struct) -> Vec<PyToken> {
     let mut tokens = Vec::new();
     let struct_td_name = format!("{}JSON", s.name);
 
-    // Generate the typed dict to define the result of to_json
-    // but mypy doesn't support generic typed dicts so only do that
-    // for non polymorphic stucts
-    // https://github.com/python/mypy/issues/3863
-    if s.type_parameters.is_empty() {
-        let td = PyToken::Import(try_import("TypedDict", "typing", "typing_extensions"), None);
-        let struct_td_attrs = intersperce(
-            PyToken::NewLine,
-            s.fields
-                .iter()
-                .map(|f| typed_attr(&f.name, vec![f.typ.get_json_type(&gen_ctx).into()], None))
-                .collect(),
-        );
-        let struct_td = py_class(&struct_td_name, vec![td], struct_td_attrs);
-        tokens.extend(struct_td);
-        tokens.push(PyToken::NewLine);
-    } else {
-        // For the moment, just output a simple alias
-        tokens.push(format!("{}JSON = ", s.name).into());
-        tokens.push(type_import("Any"));
-        tokens.push(PyToken::NewLine);
-
-        // also, generate the type alias for the tuples (from_json, to_json)
-        // required for the `from_json` class methods
-        // For example:
-        // JSON_T = Tuple[Callable[[Any], T], Callable[[T], Any]]
-        for tv in s.type_parameters.iter() {
-            if !gen_ctx.generic_json_types.contains(tv) {
-                gen_ctx.generic_json_types.insert(tv.clone());
-
-                tokens.push(format!("{} = ", tv).into());
-                tokens.push(type_import("TypeVar"));
-                tokens.push(format!("(\"{}\")", tv).into());
-                tokens.push(PyToken::NewLine);
-                // K = TypeVar("K")
-
-                tokens.push(format!("JSON_{} = ", tv).into());
-                tokens.push(type_import("Tuple"));
-                tokens.push("[".into());
-
-                tokens.push(type_import("Callable"));
-                tokens.push("[[".into());
-                tokens.push(type_import("Any"));
-                tokens.push(format!("], {}], ", tv).into());
-
-                tokens.push(type_import("Callable"));
-                tokens.push(format!("[[{}], ", tv).into());
-                tokens.push(type_import("Any"));
-                tokens.push("]".into());
-
-                tokens.push("]".into());
-                tokens.push(PyToken::NewLine);
-            }
-        }
-    }
+    // // Generate the typed dict to define the result of to_json
+    // // but mypy doesn't support generic typed dicts so only do that
+    // // for non polymorphic stucts
+    // // https://github.com/python/mypy/issues/3863
+    // if s.type_parameters.is_empty() {
+    //     let td = PyToken::Import(try_import("TypedDict", "typing", "typing_extensions"), None);
+    //     let struct_td_attrs = intersperce(
+    //         PyToken::NewLine,
+    //         s.fields
+    //             .iter()
+    //             .map(|f| typed_attr(&f.name, vec![f.typ.get_json_type(&gen_ctx).into()], None))
+    //             .collect(),
+    //     );
+    //     let struct_td = py_class(&struct_td_name, vec![td], struct_td_attrs);
+    //     tokens.extend(struct_td);
+    //     tokens.push(PyToken::NewLine);
+    // } else {
+    //     // For the moment, just output a simple alias
+    //     tokens.push(format!("{}JSON = ", s.name).into());
+    //     tokens.push(type_import("Any"));
+    //     tokens.push(PyToken::NewLine);
+    //
+    //     // // also, generate the type alias for the tuples (from_json, to_json)
+    //     // // required for the `from_json` class methods
+    //     // // For example:
+    //     // // JSON_T = Tuple[Callable[[Any], T], Callable[[T], Any]]
+    //     // for tv in s.type_parameters.iter() {
+    //     //     if !gen_ctx.generic_json_types.contains(tv) {
+    //     //         gen_ctx.generic_json_types.insert(tv.clone());
+    //     //
+    //     //         tokens.push(format!("{} = ", tv).into());
+    //     //         tokens.push(type_import("TypeVar"));
+    //     //         tokens.push(format!("(\"{}\")", tv).into());
+    //     //         tokens.push(PyToken::NewLine);
+    //     //
+    //     //         tokens.push(format!("JSON_{} = ", tv).into());
+    //     //         tokens.push(type_import("Tuple"));
+    //     //         tokens.push("[".into());
+    //     //
+    //     //         tokens.push(type_import("Callable"));
+    //     //         tokens.push("[[".into());
+    //     //         tokens.push(type_import("Any"));
+    //     //         tokens.push(format!("], {}], ", tv).into());
+    //     //
+    //     //         tokens.push(type_import("Callable"));
+    //     //         tokens.push(format!("[[{}], ", tv).into());
+    //     //         tokens.push(type_import("Any"));
+    //     //         tokens.push("]".into());
+    //     //
+    //     //         tokens.push("]".into());
+    //     //         tokens.push(PyToken::NewLine);
+    //     //     }
+    //     // }
+    // }
 
     let mut body = vec![];
 
@@ -179,32 +176,11 @@ fn gen_py_struct(mut gen_ctx: &mut GenCtx, s: &Struct) -> Vec<PyToken> {
 
     body.push(PyToken::NewLine);
 
-    // Add all _dump_T fields to serialize the corresponding generic type
-    body.extend(intersperce(
-        PyToken::NewLine,
-        s.type_parameters
-            .iter()
-            .map(|tv| {
-                typed_attr(
-                    &format!("_dump_{}", tv),
-                    vec![PyToken::Block(vec![
-                        type_import("Optional"),
-                        "[".into(),
-                        type_import("Callable"),
-                        format!("[[{}], ", tv).into(),
-                        type_import("Any"),
-                        "]] = ".into(),
-                        PyToken::Import(
-                            PyImport::Full("dataclasses".to_string()),
-                            Some("field".to_string()),
-                        ),
-                        format!("(repr=False, default=None)").into(),
-                    ])],
-                    None,
-                )
-            })
-            .collect(),
-    ));
+    for tv in &s.type_parameters {
+        tokens.push(gen_type_var(&mut gen_ctx, tv));
+    }
+
+    body.push(gen_typevar_dump_fields(&s.type_parameters));
 
     body.push(PyToken::NewLine);
     body.push(PyToken::NewLine);
@@ -215,13 +191,13 @@ fn gen_py_struct(mut gen_ctx: &mut GenCtx, s: &Struct) -> Vec<PyToken> {
         Some("abc.Mapping".to_owned()),
     );
 
-    // vec!["cls".into(), typed_attr("data", vec![any], None)],
     let mut from_json_args = vec!["cls".into()];
-    from_json_args.extend(
-        s.type_parameters
-            .iter()
-            .map(|tv| format!("json_{}: JSON_{}[{}]", tv, tv, tv).into()),
-    );
+    from_json_args.extend(s.type_parameters.iter().map(|tv| {
+        PyToken::Block(vec![
+            format!("json_{}: ", tv).into(),
+            gen_generic_parse_dump_hint(tv),
+        ])
+    }));
     from_json_args.push(typed_attr("data", vec![any], None));
 
     let mut from_json_body = vec![];
@@ -351,12 +327,12 @@ fn gen_py_struct(mut gen_ctx: &mut GenCtx, s: &Struct) -> Vec<PyToken> {
         body.push(PyToken::NewLine)
     }
 
-    let to_json_return_type = if s.type_parameters.is_empty() {
-        struct_td_name.into()
-    } else {
-        // mypy lack of generic typed dict
-        type_import("Any")
-    };
+    // let to_json_return_type = if s.type_parameters.is_empty() {
+    //     struct_td_name.into()
+    // } else {
+    //     // mypy lack of generic typed dict
+    //     type_import("Any")
+    // };
 
     let default_dump: Vec<PyToken> = s
         .type_parameters
@@ -403,7 +379,7 @@ fn gen_py_struct(mut gen_ctx: &mut GenCtx, s: &Struct) -> Vec<PyToken> {
             indent(-1),
             "}".into(),
         ],
-        Some(to_json_return_type),
+        Some(type_import("Any")),
     ));
 
     tokens.push(PyToken::NewLine);
@@ -422,7 +398,7 @@ fn gen_py_struct(mut gen_ctx: &mut GenCtx, s: &Struct) -> Vec<PyToken> {
             type_import("Generic"),
             "[".into(),
             PyToken::Block(intersperce(
-                ",".into(),
+                ", ".into(),
                 s.type_parameters
                     .iter()
                     .map(|tv| {
@@ -440,19 +416,36 @@ fn gen_py_struct(mut gen_ctx: &mut GenCtx, s: &Struct) -> Vec<PyToken> {
     tokens
 }
 
-fn gen_py_enum(mut gen_ctx: &mut GenCtx, e: &Enum) -> Vec<PyToken> {
-    if !e.type_parameters.is_empty() {
-        panic!("Enum with type parameters not supported yet");
-    }
-    let mut tokens = Vec::new();
-
-    if e.is_simple_enum() {
-        tokens.push(gen_simple_enum(&e));
+fn gen_py_enum(mut gen_ctx: &mut GenContext, e: &Enum) -> Vec<PyToken> {
+    let tok = if e.is_simple_enum() {
+        gen_simple_enum(&e)
     } else {
-        tokens.push(gen_py_sum_type(&mut gen_ctx, &e));
-    }
+        gen_py_sum_type(&mut gen_ctx, &e)
+    };
 
-    tokens
+    vec![tok]
+}
+
+/// Generate the type hint for the tuple (from_json, to_json) used
+/// in the `from_json` class methods
+fn gen_generic_parse_dump_hint(tv: &str) -> PyToken {
+    let mut tokens = Vec::new();
+    tokens.push(type_import("Tuple"));
+    tokens.push("[".into());
+
+    tokens.push(type_import("Callable"));
+    tokens.push("[[".into());
+    tokens.push(type_import("Any"));
+    tokens.push(format!("], {}], ", tv).into());
+
+    tokens.push(type_import("Callable"));
+    tokens.push(format!("[[{}], ", tv).into());
+    tokens.push(type_import("Any"));
+    tokens.push("]".into());
+
+    tokens.push("]".into());
+    tokens.push(PyToken::NewLine);
+    PyToken::Block(tokens)
 }
 
 fn gen_py_alias(_a: &Alias) -> Vec<PyToken> {
@@ -478,6 +471,14 @@ fn gather_imports(tokens: &[PyToken]) -> ImportMap {
 
     import_map.imports.insert(
         "base64",
+        ImportEntry {
+            full: true,
+            specifics: BTreeSet::new(),
+        },
+    );
+
+    import_map.imports.insert(
+        "collections",
         ImportEntry {
             full: true,
             specifics: BTreeSet::new(),
@@ -527,23 +528,23 @@ fn gather_imports(tokens: &[PyToken]) -> ImportMap {
 trait PythonJSON {
     /// Given a `Type`, return a string representing the function to parse json into
     /// that type
-    fn get_parse_function(&self, gen_ctx: &GenCtx, name: &str, depth: u8) -> String;
+    fn get_parse_function(&self, gen_ctx: &GenContext, name: &str, depth: u8) -> String;
 
     /// Dual of get_parse_function, returns a String representing the function to convert
     /// the given type into json representation
-    fn get_dump_function(&self, gen_ctx: &GenCtx, name: &str, depth: u8) -> Option<String>;
+    fn get_dump_function(&self, gen_ctx: &GenContext, name: &str, depth: u8) -> Option<String>;
 
     /// Returns a python type hint for the type itself
     /// It's usually the name of the type except for sums
-    fn get_python_type(&self, gen_ctx: &GenCtx) -> PyToken;
+    fn get_python_type(&self, gen_ctx: &GenContext) -> PyToken;
 
     /// Returns a python type hint for the json representation of
     /// this type after serialization.
-    fn get_json_type(&self, gen_ctx: &GenCtx) -> String;
+    fn get_json_type(&self, gen_ctx: &GenContext) -> String;
 }
 
 impl PythonJSON for Type {
-    fn get_dump_function(&self, gen_ctx: &GenCtx, name: &str, depth: u8) -> Option<String> {
+    fn get_dump_function(&self, gen_ctx: &GenContext, name: &str, depth: u8) -> Option<String> {
         match self {
             Type::Atomic(at) => match at {
                 AtomicType::Bytes => {
@@ -624,7 +625,7 @@ impl PythonJSON for Type {
         }
     }
 
-    fn get_parse_function(&self, gen_ctx: &GenCtx, name: &str, depth: u8) -> String {
+    fn get_parse_function(&self, gen_ctx: &GenContext, name: &str, depth: u8) -> String {
         match self {
             Type::Atomic(at) => {
                 let (instance, _err) = atomic_py_instance(at);
@@ -730,7 +731,7 @@ impl PythonJSON for Type {
         }
     }
 
-    fn get_python_type(&self, gen_ctx: &GenCtx) -> PyToken {
+    fn get_python_type(&self, gen_ctx: &GenContext) -> PyToken {
         match self {
             Type::Atomic(at) => atomic_py_instance(at).0.into(),
             Type::Reference(r) => {
@@ -786,7 +787,7 @@ impl PythonJSON for Type {
         }
     }
 
-    fn get_json_type(&self, gen_ctx: &GenCtx) -> String {
+    fn get_json_type(&self, gen_ctx: &GenContext) -> String {
         match &self {
             Type::Atomic(t) => match t {
                 AtomicType::Str => "str",
@@ -832,7 +833,7 @@ impl FieldType {
 }
 
 impl PythonJSON for FieldType {
-    fn get_parse_function(&self, gen_ctx: &GenCtx, name: &str, depth: u8) -> String {
+    fn get_parse_function(&self, gen_ctx: &GenContext, name: &str, depth: u8) -> String {
         match self {
             FieldType::TypeOf(_) => {
                 Type::Atomic(AtomicType::Str).get_parse_function(&gen_ctx, name, depth)
@@ -841,7 +842,7 @@ impl PythonJSON for FieldType {
         }
     }
 
-    fn get_dump_function(&self, gen_ctx: &GenCtx, name: &str, depth: u8) -> Option<String> {
+    fn get_dump_function(&self, gen_ctx: &GenContext, name: &str, depth: u8) -> Option<String> {
         match self {
             FieldType::TypeOf(_) => {
                 Type::Atomic(AtomicType::Str).get_dump_function(&gen_ctx, name, depth)
@@ -850,14 +851,14 @@ impl PythonJSON for FieldType {
         }
     }
 
-    fn get_python_type(&self, gen_ctx: &GenCtx) -> PyToken {
+    fn get_python_type(&self, gen_ctx: &GenContext) -> PyToken {
         match self {
             FieldType::TypeOf(_) => "str".into(),
             FieldType::Type(t) => t.get_python_type(gen_ctx),
         }
     }
 
-    fn get_json_type(&self, gen_ctx: &GenCtx) -> String {
+    fn get_json_type(&self, gen_ctx: &GenContext) -> String {
         match self {
             FieldType::TypeOf(_) => "str".to_string(),
             FieldType::Type(t) => t.get_json_type(&gen_ctx),
@@ -896,7 +897,8 @@ fn gen_simple_enum(e: &Enum) -> PyToken {
             PyToken::Import(cast, None),
             format!("(str, self.value)").into(),
         ],
-        Some("str".into()),
+        Some(type_import("Any")),
+        // Some("str".into()),
     ));
     body.push(PyToken::NewLine);
     body.push(PyToken::NewLine);
@@ -937,31 +939,25 @@ fn gen_simple_enum(e: &Enum) -> PyToken {
     PyToken::Block(py_class(&e.name.to_pascal_case(), vec![enum_class], body))
 }
 
-fn gen_py_sum_type(mut gen_ctx: &mut GenCtx, e: &Enum) -> PyToken {
+fn gen_py_sum_type(mut gen_ctx: &mut GenContext, e: &Enum) -> PyToken {
     let mut tokens = vec![];
-    let mut variants_type_names = vec![];
+    // let mut variants_type_names = vec![];
+
+    for tv in &e.type_parameters {
+        tokens.push(gen_type_var(&mut gen_ctx, tv));
+    }
 
     for variant in &e.variants {
-        let (name, tok) = gen_enum_variant(&mut gen_ctx, &variant, &e.directives);
+        let tok = gen_enum_variant(&mut gen_ctx, &variant, &e.directives);
         tokens.push(tok);
         tokens.push(PyToken::NewLine);
-        variants_type_names.push(name);
+        // variants_type_names.push(name);
     }
 
     // the union of all variants
     tokens.push(format!("{}TypeDef = ", e.name).into());
     tokens.push(typed_union(
         e.variants.iter().map(|v| v.name.clone().into()).collect(),
-    ));
-    tokens.push(PyToken::NewLine);
-
-    // the union of all variants after calling to_json() on them
-    tokens.push(format!("{}JSON = ", e.name).into());
-    tokens.push(typed_union(
-        variants_type_names
-            .iter()
-            .map(|n| format!("{}", n).into())
-            .collect(),
     ));
     tokens.push(PyToken::NewLine);
     tokens.push(PyToken::NewLine);
@@ -971,7 +967,7 @@ fn gen_py_sum_type(mut gen_ctx: &mut GenCtx, e: &Enum) -> PyToken {
     PyToken::Block(tokens)
 }
 
-fn gen_from_json_enum(_gen_ctx: &GenCtx, e: &Enum) -> PyToken {
+fn gen_from_json_enum(_gen_ctx: &GenContext, e: &Enum) -> PyToken {
     let mut from_json_body = vec![];
 
     let json_directive = e
@@ -1038,12 +1034,17 @@ fn gen_from_json_enum(_gen_ctx: &GenCtx, e: &Enum) -> PyToken {
                 if arg.is_empty() {
                     format!("return {}({})", variant.name.to_pascal_case(), arg).into()
                 } else {
-                    format!(
-                        "return {}.from_json({})",
-                        variant.name.to_pascal_case(),
-                        arg
-                    )
-                    .into()
+                    let mut return_toks =
+                        vec![
+                            format!("return {}.from_json({}", variant.name.to_pascal_case(), arg)
+                                .into(),
+                        ];
+
+                    for tv in variant.value.get_type_vars() {
+                        return_toks.push(format!(", json_{}", tv).into());
+                    }
+                    return_toks.push(")".into());
+                    PyToken::Block(return_toks)
                 },
             )
             .into(),
@@ -1089,9 +1090,18 @@ fn gen_from_json_enum(_gen_ctx: &GenCtx, e: &Enum) -> PyToken {
                     suppress,
                     "(ValidationError):".into(),
                     indent(1),
-                    format!("return {}.from_json(contents)", v.name.to_pascal_case()).into(),
-                    indent(-1),
                 ]);
+                from_json_body
+                    .push(format!("return {}.from_json(contents", v.name.to_pascal_case()).into());
+                for tv in v.value.get_type_vars() {
+                    from_json_body.push(format!(", json_{}", tv).into());
+                }
+                from_json_body.push(")".into());
+                from_json_body.push(indent(-1));
+
+                //     format!("return {}.from_json(contents)", v.name.to_pascal_case()).into(),
+                //     indent(-1),
+                // ]);
             }
 
             from_json_body
@@ -1102,6 +1112,14 @@ fn gen_from_json_enum(_gen_ctx: &GenCtx, e: &Enum) -> PyToken {
     }
 
     let mut from_json_args = vec!["cls".into(), typed_attr("data", vec!["Any".into()], None)];
+
+    for tv in &e.type_parameters {
+        from_json_args.push(PyToken::Block(vec![
+            format!("json_{}: ", tv).into(),
+            gen_generic_parse_dump_hint(tv),
+        ]));
+    }
+
     match json_directive.repr {
         JsonRepr::Union => from_json_args.push(typed_attr(
             "tag",
@@ -1137,11 +1155,12 @@ fn gen_from_json_enum(_gen_ctx: &GenCtx, e: &Enum) -> PyToken {
     ))
 }
 
+/// Returns the tokens for the variant
 fn gen_enum_variant(
-    mut gen_ctx: &mut GenCtx,
+    mut gen_ctx: &mut GenContext,
     variant: &EnumVariant,
     directives: &Directives,
-) -> (String, PyToken) {
+) -> PyToken {
     let mut tokens = Vec::new();
     let dataclass = PyToken::Import(
         PyImport::Specific("dataclasses".to_owned(), "dataclass".to_owned()),
@@ -1150,8 +1169,8 @@ fn gen_enum_variant(
 
     tokens.push(PyToken::NewLine);
 
-    let (td_name, json_type) = gen_enum_variant_json_type(&mut gen_ctx, variant, directives);
-    tokens.push(json_type);
+    // let (td_name, json_type) = gen_enum_variant_json_type(&mut gen_ctx, variant, directives);
+    // tokens.push(json_type);
 
     tokens.push(PyToken::NewLine);
     tokens.push(PyToken::NewLine);
@@ -1167,19 +1186,63 @@ fn gen_enum_variant(
     class_body.push(gen_json_type_enum_variant(variant));
     tokens.push(PyToken::NewLine);
 
-    class_body.push(gen_to_json_enum_variant(
-        &gen_ctx,
-        &variant,
-        &directives,
-        &td_name,
-    ));
+    class_body.push(gen_to_json_enum_variant(&gen_ctx, &variant, &directives));
 
     tokens.push("@".into());
     tokens.push(dataclass);
     tokens.push(PyToken::NewLine);
-    tokens.extend(py_class(&variant.name.to_pascal_case(), vec![], class_body));
+    let generic_class_params: Vec<PyToken> = variant
+        .value
+        .get_type_vars()
+        .into_iter()
+        .map(|tv| tv.into())
+        .collect();
 
-    (td_name, PyToken::Block(tokens))
+    tokens.extend(py_class(
+        &variant.name.to_pascal_case(),
+        if generic_class_params.is_empty() {
+            vec![]
+        } else {
+            vec![PyToken::Block(vec![
+                type_import("Generic"),
+                "[".into(),
+                PyToken::Block(intersperce(", ".into(), generic_class_params)),
+                "]".into(),
+            ])]
+        },
+        class_body,
+    ));
+
+    PyToken::Block(tokens)
+}
+
+/// Generate all the _dump_T fields to serialize the corresponding generic type
+fn gen_typevar_dump_fields(type_vars: &Vec<String>) -> PyToken {
+    PyToken::Block(intersperce(
+        PyToken::NewLine,
+        type_vars
+            .iter()
+            .map(|tv| {
+                typed_attr(
+                    &format!("_dump_{}", tv),
+                    vec![PyToken::Block(vec![
+                        type_import("Optional"),
+                        "[".into(),
+                        type_import("Callable"),
+                        format!("[[{}], ", tv).into(),
+                        type_import("Any"),
+                        "]] = ".into(),
+                        PyToken::Import(
+                            PyImport::Full("dataclasses".to_string()),
+                            Some("field".to_string()),
+                        ),
+                        format!("(repr=False, default=None)").into(),
+                    ])],
+                    None,
+                )
+            })
+            .collect(),
+    ))
 }
 
 /// generate the property to get the json tag for this variant
@@ -1204,21 +1267,21 @@ fn gen_json_type_enum_variant(variant: &EnumVariant) -> PyToken {
 
 /// name and tokens to describe the return type of .to_json()
 fn gen_enum_variant_json_type(
-    gen_ctx: &mut GenCtx,
+    mut gen_ctx: &mut GenContext,
     variant: &EnumVariant,
     directives: &Directives,
 ) -> (String, PyToken) {
     let x = directives.json.as_ref().map(|x| x.1.repr);
     let repr = x.unwrap_or_default();
     match repr {
-        JsonRepr::Object => gen_enum_variant_typedict(&gen_ctx, &variant, directives),
-        JsonRepr::Tuple => gen_enum_variant_tuple(&gen_ctx, &variant),
-        JsonRepr::Union => gen_enum_variant_union(&gen_ctx, &variant),
+        JsonRepr::Object => gen_enum_variant_typedict(&mut gen_ctx, &variant, directives),
+        JsonRepr::Tuple => gen_enum_variant_tuple(&mut gen_ctx, &variant),
+        JsonRepr::Union => gen_enum_variant_union(&mut gen_ctx, &variant),
     }
 }
 
 fn gen_enum_variant_typedict(
-    gen_ctx: &GenCtx,
+    gen_ctx: &mut GenContext,
     variant: &EnumVariant,
     directives: &Directives,
 ) -> (String, PyToken) {
@@ -1263,15 +1326,52 @@ fn gen_enum_variant_typedict(
                 td_class_body.push(typed_attr(&content_name, typs, None));
             }
         }
-        VariantValue::StructCtor(_) => todo!("anon struct in sum type"),
     }
 
-    let tokens = py_class(&td_name, vec![type_import("TypedDict")], td_class_body);
+    let mut tokens = vec![];
+
+    tokens.push(PyToken::NewLine);
+    // for tv in variant.value.get_type_vars().iter() {
+    //     if !gen_ctx.generic_json_types.contains(tv) {
+    //         gen_ctx.generic_json_types.insert(tv.clone());
+    //
+    //         tokens.push(format!("{} = ", tv).into());
+    //         tokens.push(type_import("TypeVar"));
+    //         tokens.push(format!("(\"{}\")", tv).into());
+    //         tokens.push(PyToken::NewLine);
+    //
+    //         tokens.push(format!("JSON_{} = ", tv).into());
+    //         tokens.push(type_import("Tuple"));
+    //         tokens.push("[".into());
+    //
+    //         tokens.push(type_import("Callable"));
+    //         tokens.push("[[".into());
+    //         tokens.push(type_import("Any"));
+    //         tokens.push(format!("], {}], ", tv).into());
+    //
+    //         tokens.push(type_import("Callable"));
+    //         tokens.push(format!("[[{}], ", tv).into());
+    //         tokens.push(type_import("Any"));
+    //         tokens.push("]".into());
+    //
+    //         tokens.push("]".into());
+    //         tokens.push(PyToken::NewLine);
+    //     }
+    // }
+
+    tokens.append(&mut py_class(
+        &td_name,
+        vec![type_import("TypedDict")],
+        td_class_body,
+    ));
 
     (td_name, PyToken::Block(tokens))
 }
 
-fn gen_enum_variant_tuple(gen_ctx: &GenCtx, variant: &EnumVariant) -> (String, PyToken) {
+fn gen_enum_variant_tuple(
+    mut gen_ctx: &mut GenContext,
+    variant: &EnumVariant,
+) -> (String, PyToken) {
     let tuple = type_import("Tuple");
     let tuple_name = format!("{}JSON", variant.name);
     let mut tuple_args = vec!["str".into()];
@@ -1283,23 +1383,54 @@ fn gen_enum_variant_tuple(gen_ctx: &GenCtx, variant: &EnumVariant) -> (String, P
                 tuple_args.push(r.get_json_type(&gen_ctx).into());
             }
         }
-        VariantValue::StructCtor(_) => {
-            todo!("anon struct in sum type");
-        }
     }
-    (
-        tuple_name.clone(),
-        PyToken::Block(vec![
-            format!("{} = ", tuple_name).into(),
-            tuple,
-            "[".into(),
-            PyToken::Block(tuple_args),
-            "]".into(),
-        ]),
-    )
+
+    let mut tokens = vec![];
+
+    tokens.push(PyToken::NewLine);
+    // for tv in variant.value.get_type_vars().iter() {
+    //     if !gen_ctx.generic_json_types.contains(tv) {
+    //         gen_ctx.generic_json_types.insert(tv.clone());
+    //
+    //         tokens.push(format!("{} = ", tv).into());
+    //         tokens.push(type_import("TypeVar"));
+    //         tokens.push(format!("(\"{}\")", tv).into());
+    //         tokens.push(PyToken::NewLine);
+    //
+    //         tokens.push(format!("JSON_{} = ", tv).into());
+    //         tokens.push(type_import("Tuple"));
+    //         tokens.push("[".into());
+    //
+    //         tokens.push(type_import("Callable"));
+    //         tokens.push("[[".into());
+    //         tokens.push(type_import("Any"));
+    //         tokens.push(format!("], {}], ", tv).into());
+    //
+    //         tokens.push(type_import("Callable"));
+    //         tokens.push(format!("[[{}], ", tv).into());
+    //         tokens.push(type_import("Any"));
+    //         tokens.push("]".into());
+    //
+    //         tokens.push("]".into());
+    //         tokens.push(PyToken::NewLine);
+    //     }
+    // }
+
+    tokens.append(&mut vec![
+        format!("{} = ", tuple_name).into(),
+        tuple,
+        "[".into(),
+        PyToken::Block(tuple_args),
+        "]".into(),
+    ]);
+
+    (tuple_name.clone(), PyToken::Block(tokens))
 }
 
-fn gen_enum_variant_union(gen_ctx: &GenCtx, variant: &EnumVariant) -> (String, PyToken) {
+fn gen_enum_variant_union(
+    mut gen_ctx: &mut GenContext,
+    variant: &EnumVariant,
+) -> (String, PyToken) {
     match &variant.value {
         VariantValue::OnlyCtor => ("None".to_string(), PyToken::Block(vec![])),
         VariantValue::PositionalCtor(refs) => {
@@ -1311,29 +1442,81 @@ fn gen_enum_variant_union(gen_ctx: &GenCtx, variant: &EnumVariant) -> (String, P
                 );
             }
 
-            let mut typs = vec![format!("{} = ", name.clone()).into(), type_import("Tuple")];
-            typs.push("[".into());
-            typs.extend(intersperce(
+            let mut tokens = vec![];
+
+            tokens.push(PyToken::NewLine);
+            // for tv in variant.value.get_type_vars().iter() {
+            //     if !gen_ctx.generic_json_types.contains(tv) {
+            //         gen_ctx.generic_json_types.insert(tv.clone());
+            //
+            //         tokens.push(format!("{} = ", tv).into());
+            //         tokens.push(type_import("TypeVar"));
+            //         tokens.push(format!("(\"{}\")", tv).into());
+            //         tokens.push(PyToken::NewLine);
+            //
+            //         tokens.push(format!("JSON_{} = ", tv).into());
+            //         tokens.push(type_import("Tuple"));
+            //         tokens.push("[".into());
+            //
+            //         tokens.push(type_import("Callable"));
+            //         tokens.push("[[".into());
+            //         tokens.push(type_import("Any"));
+            //         tokens.push(format!("], {}], ", tv).into());
+            //
+            //         tokens.push(type_import("Callable"));
+            //         tokens.push(format!("[[{}], ", tv).into());
+            //         tokens.push(type_import("Any"));
+            //         tokens.push("]".into());
+            //
+            //         tokens.push("]".into());
+            //         tokens.push(PyToken::NewLine);
+            //     }
+            // }
+
+            tokens.append(&mut vec![
+                format!("{} = ", name.clone()).into(),
+                type_import("Tuple"),
+            ]);
+            tokens.push("[".into());
+            tokens.extend(intersperce(
                 ", ".into(),
                 refs.iter()
                     .map(|t| t.get_json_type(&gen_ctx).into())
                     .collect(),
             ));
-            typs.push("]".into());
-            (name, PyToken::Block(typs))
+            tokens.push("]".into());
+
+            (name, PyToken::Block(tokens))
         }
-        VariantValue::StructCtor(_) => todo!("anon struct in sum type"),
     }
 }
 
 /// Generate the from_json class method for a given enum's variant.
 /// Also generate tokens for the `inner` attribute
 fn gen_enum_variant_from_json(
-    gen_ctx: &mut GenCtx,
+    gen_ctx: &mut GenContext,
     variant: &EnumVariant,
     directives: &Directives,
 ) -> PyToken {
     let mut from_json_body = vec![];
+    let parse_generic_functions = variant
+        .value
+        .get_type_vars()
+        .into_iter()
+        .map(|tv| format!("parse_{}, dump_{} = json_{}", tv, tv, tv).into())
+        .collect();
+
+    let tvs = variant.value.get_type_vars();
+    let return_type = if tvs.is_empty() {
+        Some(format!(r#""{}""#, variant.name.to_pascal_case()).into())
+    } else {
+        let mut rt: String = format!("\"{}[", variant.name.to_pascal_case());
+        for x in intersperce(", ".to_string(), tvs) {
+            rt += &x;
+        }
+        rt += "]\"";
+        Some(rt.into())
+    };
 
     match &variant.value {
         VariantValue::OnlyCtor => {}
@@ -1347,6 +1530,8 @@ fn gen_enum_variant_from_json(
                 ));
 
                 from_json_body.push(PyToken::NewLine);
+                from_json_body.push(gen_typevar_dump_fields(&variant.value.get_type_vars()));
+
                 from_json_body.push(PyToken::NewLine);
 
                 let json_directive = directives
@@ -1367,6 +1552,28 @@ fn gen_enum_variant_from_json(
                     ),
                 };
 
+                let mut cls_args: Vec<PyToken> = vec!["inner".into()];
+                cls_args.append(
+                    &mut variant
+                        .value
+                        .get_type_vars()
+                        .into_iter()
+                        .map(|tv| format!("dump_{}", tv).into())
+                        .collect(),
+                );
+
+                let json_args = variant
+                    .value
+                    .get_type_vars()
+                    .iter()
+                    .map(|tv| {
+                        PyToken::Block(vec![
+                            format!("json_{}: ", tv).into(),
+                            gen_generic_parse_dump_hint(tv),
+                        ])
+                    })
+                    .collect();
+
                 from_json_body.push("@classmethod".into());
                 from_json_body.push(PyToken::NewLine);
                 from_json_body.extend(py_fn(
@@ -1374,13 +1581,18 @@ fn gen_enum_variant_from_json(
                     vec![
                         "cls".into(),
                         typed_attr("data", vec![type_import("Any")], None),
+                        PyToken::Block(intersperce(", ".into(), json_args)),
                     ],
                     vec![
+                        PyToken::Block(intersperce(PyToken::NewLine, parse_generic_functions)),
+                        PyToken::NewLine,
                         parse_fn.into(),
                         PyToken::NewLine,
-                        "return cls(inner)".into(),
+                        "return cls(".into(),
+                        PyToken::Block(intersperce(", ".into(), cls_args)),
+                        ")".into(),
                     ],
-                    Some(format!(r#""{}""#, variant.name.to_pascal_case()).into()),
+                    return_type,
                 ));
 
                 from_json_body.push(PyToken::NewLine);
@@ -1400,6 +1612,8 @@ fn gen_enum_variant_from_json(
                 from_json_body.push("]".into());
 
                 from_json_body.push(PyToken::NewLine);
+                from_json_body.push(gen_typevar_dump_fields(&variant.value.get_type_vars()));
+
                 from_json_body.push(PyToken::NewLine);
 
                 let mut parse_fns: Vec<_> = refs
@@ -1408,6 +1622,18 @@ fn gen_enum_variant_from_json(
                     .collect();
                 parse_fns.push("data".to_owned());
 
+                let json_args = variant
+                    .value
+                    .get_type_vars()
+                    .iter()
+                    .map(|tv| {
+                        PyToken::Block(vec![
+                            format!("json_{}: ", tv).into(),
+                            gen_generic_parse_dump_hint(tv),
+                        ])
+                    })
+                    .collect();
+
                 from_json_body.push("@classmethod".into());
                 from_json_body.push(PyToken::NewLine);
                 from_json_body.extend(py_fn(
@@ -1415,8 +1641,11 @@ fn gen_enum_variant_from_json(
                     vec![
                         "cls".into(),
                         typed_attr("data", vec![type_import("Any")], None),
+                        PyToken::Block(intersperce(", ".into(), json_args)),
                     ],
                     vec![
+                        PyToken::Block(intersperce(PyToken::NewLine, parse_generic_functions)),
+                        PyToken::NewLine,
                         format!(
                             r#"inner = parse_tuple_{}({})"#,
                             refs.len(),
@@ -1426,13 +1655,12 @@ fn gen_enum_variant_from_json(
                         PyToken::NewLine,
                         "return cls(inner)".into(),
                     ],
-                    Some(format!(r#""{}""#, variant.name.to_pascal_case()).into()),
+                    return_type,
                 ));
 
                 from_json_body.push(PyToken::NewLine);
             }
         }
-        VariantValue::StructCtor(_) => todo!("StructCtor not implemented"),
     }
 
     PyToken::Block(from_json_body)
@@ -1440,10 +1668,9 @@ fn gen_enum_variant_from_json(
 
 /// Generate the function to_json(self) -> JSONType for a given enum's variant
 fn gen_to_json_enum_variant(
-    gen_ctx: &GenCtx,
+    gen_ctx: &GenContext,
     variant: &EnumVariant,
     directives: &Directives,
-    json_type: &str,
 ) -> PyToken {
     let json_directive = directives
         .json
@@ -1470,14 +1697,48 @@ fn gen_to_json_enum_variant(
         },
 
         VariantValue::PositionalCtor(refs) => {
-            // let mut to_json_contents = vec!["str".into()];
             let to_json_contents = if refs.len() == 1 {
+                match &refs[0] {
+                    Type::TypeParameter(tv) => {
+                        function_body.push(
+                            If::new(
+                                format!("self._dump_{} is None", tv).into(),
+                                format!("self._dump_{} = get_dump_function(self.inner)", tv).into(),
+                            )
+                            .into(),
+                        );
+                        function_body.push(PyToken::NewLine);
+                    }
+                    _ => (),
+                };
+
                 let val_name = "self.inner".to_string();
                 vec![(&refs[0])
                     .get_dump_function(&gen_ctx, &val_name, 0)
                     .unwrap_or(val_name)
                     .into()]
             } else {
+                // In case the self._dump_T functions are null, generate them
+                let default_dump = refs
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, r)| match r {
+                        Type::TypeParameter(tv) => Some(
+                            If::new(
+                                format!("self._dump_{} is None", tv).into(),
+                                format!(
+                                    "self._dump_{} = get_dump_function(self.inner[{}])",
+                                    tv, idx
+                                )
+                                .into(),
+                            )
+                            .into(),
+                        ),
+                        _ => None,
+                    })
+                    .collect();
+                function_body.push(PyToken::Block(default_dump));
+
                 refs.iter()
                     .enumerate()
                     .map(|(idx, r)| {
@@ -1512,19 +1773,19 @@ fn gen_to_json_enum_variant(
                     function_body.push(")".into());
                 }
             }
-        }
-        VariantValue::StructCtor(_) => todo!("StructCtor not implemented"),
+        } // VariantValue::StructCtor(_) => todo!("StructCtor not implemented"),
     };
 
     PyToken::Block(py_fn(
         "to_json",
         vec!["self".into()],
         function_body,
-        Some(json_type.into()),
+        Some(type_import("Any")),
+        // Some(json_type.into()),
     ))
 }
 
-fn gen_tuple_typevars(mut gen_ctx: &mut GenCtx, n: u8) -> PyToken {
+fn gen_tuple_typevars(mut gen_ctx: &mut GenContext, n: u8) -> PyToken {
     let mut tokens = vec![];
     // let tv = PyToken::Import(
     //     PyImport::Specific("typing".to_owned(), "TypeVar".to_owned()),
@@ -1798,7 +2059,7 @@ impl From<Type> for PyToken {
 }
 
 impl Type {
-    fn to_py_token(&self, gen_ctx: &GenCtx) -> PyToken {
+    fn to_py_token(&self, gen_ctx: &GenContext) -> PyToken {
         match &self {
             Type::Atomic(at) => at.into(),
             Type::Reference(r) => {
@@ -1842,6 +2103,14 @@ impl Type {
                 }
             },
             Type::TypeParameter(tv) => format!("{}", tv).into(),
+        }
+    }
+
+    /// to test if a FieldType is exactly a given type parameter
+    fn is_typevar(&self, tv: &str) -> bool {
+        match &self {
+            Type::TypeParameter(x) if x == tv => true,
+            _ => false,
         }
     }
 }
@@ -2081,7 +2350,7 @@ fn type_import(typ: &str) -> PyToken {
 }
 
 /// Optionally output a token for a TypeVar definition
-fn gen_type_var(gen_ctx: &mut GenCtx, tv: &str) -> PyToken {
+fn gen_type_var(gen_ctx: &mut GenContext, tv: &str) -> PyToken {
     if gen_ctx.type_variables.contains(tv) {
         PyToken::Empty
     } else {

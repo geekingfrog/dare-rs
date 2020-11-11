@@ -26,7 +26,104 @@
           }
         }
       }
+    ],
+    "Mono": [
+      {
+        "description": "valid monomorphised struct",
+        "valid": true,
+        "data": {
+          "field_foo": {
+            "field_t": "ZGVhZGJlZWY="
+          },
+          "field_bar": {
+            "field_u": 2,
+            "field_foo": {
+              "field_t": "hello"
+            }
+          },
+          "field_nested": {
+            "field_t": [
+              {
+                "field_t": true
+              }
+            ]
+          }
+        }
+      },
+      {
+        "description": "single constructor invalid type",
+        "valid": false,
+        "data": {
+          "field_foo": {
+            "field_t": "invalid base 64"
+          },
+          "field_bar": {
+            "field_u": 2,
+            "field_foo": {
+              "field_t": "hello"
+            }
+          },
+          "field_nested": {
+            "field_t": []
+          }
+        }
+      },
+      {
+        "description": "multi constructor invalid type for first one",
+        "valid": false,
+        "data": {
+          "field_foo": {
+            "field_t": "ZGVhZGJlZWY="
+          },
+          "field_bar": {
+            "field_u": [],
+            "field_foo": {
+              "field_t": "hello"
+            }
+          },
+          "field_nested": {
+            "field_t": []
+          }
+        }
+      },
+      {
+        "description": "multi constructor invalid type for second one",
+        "valid": false,
+        "data": {
+          "field_foo": {
+            "field_t": "ZGVhZGJlZWY="
+          },
+          "field_bar": {
+            "field_u": 2,
+            "field_foo": "not a Foo"
+          },
+          "field_nested": {
+            "field_t": []
+          }
+        }
+      },
+      {
+        "description": "invalid deeply nested type",
+        "valid": false,
+        "data": {
+          "field_foo": {
+            "field_t": "ZGVhZGJlZWY="
+          },
+          "field_bar": {
+            "field_u": 2,
+            "field_foo": {
+              "field_t": "hello"
+            }
+          },
+          "field_nested": {
+            "field_t": [
+              {
+                "field_t": "not a boolean"
+              }
+            ]
+          }
+        }
+      }
     ]
   }
 }
-

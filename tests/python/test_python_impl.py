@@ -48,15 +48,28 @@ def test_typeof_automatically_set() -> None:
     assert resp.to_json() == {"result": "all is well", "response_type": "ok"}
 
 
+# TODO do the same for sum types
 def test_generic_struct() -> None:
     # check that one can omit the _dump_T functions when constructing objects
     # and everything still works
-    # TODO do the same for sum types
     x = generic_struct.FooInt(field_int=generic_struct.Foo(2))
     assert x.to_json() == {"field_int": {"field_t": 2}}
 
+
+def test_typevar_with_builtin() -> None:
     bar = generic_struct.Bar(["list", "of", "strings"], generic_struct.Foo(None))
     assert bar.to_json() == {
         "field_u": ["list", "of", "strings"],
         "field_foo": {"field_t": None},
+    }
+
+
+def test_monomorphised_struct() -> None:
+    bar = generic_struct.Bar(2, generic_struct.Foo("hello"))
+    nested = generic_struct.Foo([generic_struct.Foo(True)])
+    x = generic_struct.Mono(generic_struct.Foo(b"deadbeef"), bar, nested)
+    assert x.to_json() == {
+        "field_foo": {"field_t": "ZGVhZGJlZWY="},
+        "field_bar": {"field_u": 2, "field_foo": {"field_t": "hello"}},
+        "field_nested": {"field_t": [{"field_t": True}]},
     }
