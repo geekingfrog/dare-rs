@@ -97,61 +97,6 @@ fn gen_py_struct(mut gen_ctx: &mut GenContext, s: &Struct) -> Vec<PyToken> {
     let mut tokens = Vec::new();
     let struct_td_name = format!("{}JSON", s.name);
 
-    // // Generate the typed dict to define the result of to_json
-    // // but mypy doesn't support generic typed dicts so only do that
-    // // for non polymorphic stucts
-    // // https://github.com/python/mypy/issues/3863
-    // if s.type_parameters.is_empty() {
-    //     let td = PyToken::Import(try_import("TypedDict", "typing", "typing_extensions"), None);
-    //     let struct_td_attrs = intersperce(
-    //         PyToken::NewLine,
-    //         s.fields
-    //             .iter()
-    //             .map(|f| typed_attr(&f.name, vec![f.typ.get_json_type(&gen_ctx).into()], None))
-    //             .collect(),
-    //     );
-    //     let struct_td = py_class(&struct_td_name, vec![td], struct_td_attrs);
-    //     tokens.extend(struct_td);
-    //     tokens.push(PyToken::NewLine);
-    // } else {
-    //     // For the moment, just output a simple alias
-    //     tokens.push(format!("{}JSON = ", s.name).into());
-    //     tokens.push(type_import("Any"));
-    //     tokens.push(PyToken::NewLine);
-    //
-    //     // // also, generate the type alias for the tuples (from_json, to_json)
-    //     // // required for the `from_json` class methods
-    //     // // For example:
-    //     // // JSON_T = Tuple[Callable[[Any], T], Callable[[T], Any]]
-    //     // for tv in s.type_parameters.iter() {
-    //     //     if !gen_ctx.generic_json_types.contains(tv) {
-    //     //         gen_ctx.generic_json_types.insert(tv.clone());
-    //     //
-    //     //         tokens.push(format!("{} = ", tv).into());
-    //     //         tokens.push(type_import("TypeVar"));
-    //     //         tokens.push(format!("(\"{}\")", tv).into());
-    //     //         tokens.push(PyToken::NewLine);
-    //     //
-    //     //         tokens.push(format!("JSON_{} = ", tv).into());
-    //     //         tokens.push(type_import("Tuple"));
-    //     //         tokens.push("[".into());
-    //     //
-    //     //         tokens.push(type_import("Callable"));
-    //     //         tokens.push("[[".into());
-    //     //         tokens.push(type_import("Any"));
-    //     //         tokens.push(format!("], {}], ", tv).into());
-    //     //
-    //     //         tokens.push(type_import("Callable"));
-    //     //         tokens.push(format!("[[{}], ", tv).into());
-    //     //         tokens.push(type_import("Any"));
-    //     //         tokens.push("]".into());
-    //     //
-    //     //         tokens.push("]".into());
-    //     //         tokens.push(PyToken::NewLine);
-    //     //     }
-    //     // }
-    // }
-
     let mut body = vec![];
 
     // Generate the class attribute with their type
@@ -326,13 +271,6 @@ fn gen_py_struct(mut gen_ctx: &mut GenContext, s: &Struct) -> Vec<PyToken> {
         ));
         body.push(PyToken::NewLine)
     }
-
-    // let to_json_return_type = if s.type_parameters.is_empty() {
-    //     struct_td_name.into()
-    // } else {
-    //     // mypy lack of generic typed dict
-    //     type_import("Any")
-    // };
 
     let default_dump: Vec<PyToken> = s
         .type_parameters
@@ -1370,33 +1308,6 @@ fn gen_enum_variant_typedict(
     let mut tokens = vec![];
 
     tokens.push(PyToken::NewLine);
-    // for tv in variant.value.get_type_vars().iter() {
-    //     if !gen_ctx.generic_json_types.contains(tv) {
-    //         gen_ctx.generic_json_types.insert(tv.clone());
-    //
-    //         tokens.push(format!("{} = ", tv).into());
-    //         tokens.push(type_import("TypeVar"));
-    //         tokens.push(format!("(\"{}\")", tv).into());
-    //         tokens.push(PyToken::NewLine);
-    //
-    //         tokens.push(format!("JSON_{} = ", tv).into());
-    //         tokens.push(type_import("Tuple"));
-    //         tokens.push("[".into());
-    //
-    //         tokens.push(type_import("Callable"));
-    //         tokens.push("[[".into());
-    //         tokens.push(type_import("Any"));
-    //         tokens.push(format!("], {}], ", tv).into());
-    //
-    //         tokens.push(type_import("Callable"));
-    //         tokens.push(format!("[[{}], ", tv).into());
-    //         tokens.push(type_import("Any"));
-    //         tokens.push("]".into());
-    //
-    //         tokens.push("]".into());
-    //         tokens.push(PyToken::NewLine);
-    //     }
-    // }
 
     tokens.append(&mut py_class(
         &td_name,
@@ -1427,34 +1338,6 @@ fn gen_enum_variant_tuple(
     let mut tokens = vec![];
 
     tokens.push(PyToken::NewLine);
-    // for tv in variant.value.get_type_vars().iter() {
-    //     if !gen_ctx.generic_json_types.contains(tv) {
-    //         gen_ctx.generic_json_types.insert(tv.clone());
-    //
-    //         tokens.push(format!("{} = ", tv).into());
-    //         tokens.push(type_import("TypeVar"));
-    //         tokens.push(format!("(\"{}\")", tv).into());
-    //         tokens.push(PyToken::NewLine);
-    //
-    //         tokens.push(format!("JSON_{} = ", tv).into());
-    //         tokens.push(type_import("Tuple"));
-    //         tokens.push("[".into());
-    //
-    //         tokens.push(type_import("Callable"));
-    //         tokens.push("[[".into());
-    //         tokens.push(type_import("Any"));
-    //         tokens.push(format!("], {}], ", tv).into());
-    //
-    //         tokens.push(type_import("Callable"));
-    //         tokens.push(format!("[[{}], ", tv).into());
-    //         tokens.push(type_import("Any"));
-    //         tokens.push("]".into());
-    //
-    //         tokens.push("]".into());
-    //         tokens.push(PyToken::NewLine);
-    //     }
-    // }
-
     tokens.append(&mut vec![
         format!("{} = ", tuple_name).into(),
         tuple,
@@ -1484,33 +1367,6 @@ fn gen_enum_variant_union(
             let mut tokens = vec![];
 
             tokens.push(PyToken::NewLine);
-            // for tv in variant.value.get_type_vars().iter() {
-            //     if !gen_ctx.generic_json_types.contains(tv) {
-            //         gen_ctx.generic_json_types.insert(tv.clone());
-            //
-            //         tokens.push(format!("{} = ", tv).into());
-            //         tokens.push(type_import("TypeVar"));
-            //         tokens.push(format!("(\"{}\")", tv).into());
-            //         tokens.push(PyToken::NewLine);
-            //
-            //         tokens.push(format!("JSON_{} = ", tv).into());
-            //         tokens.push(type_import("Tuple"));
-            //         tokens.push("[".into());
-            //
-            //         tokens.push(type_import("Callable"));
-            //         tokens.push("[[".into());
-            //         tokens.push(type_import("Any"));
-            //         tokens.push(format!("], {}], ", tv).into());
-            //
-            //         tokens.push(type_import("Callable"));
-            //         tokens.push(format!("[[{}], ", tv).into());
-            //         tokens.push(type_import("Any"));
-            //         tokens.push("]".into());
-            //
-            //         tokens.push("]".into());
-            //         tokens.push(PyToken::NewLine);
-            //     }
-            // }
 
             tokens.append(&mut vec![
                 format!("{} = ", name.clone()).into(),
