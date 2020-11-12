@@ -15,6 +15,7 @@ from dare import (
     nested,
     typeof,
     generic_struct,
+    generic_sum,
 )
 from typing import Any, List, Tuple, TypedDict, cast
 
@@ -55,7 +56,7 @@ def gather_tests(specs_and_modules: List[Tuple[str, Any]]) -> List[Spec]:
     return tests
 
 
-@pytest.mark.parametrize(  # type: ignore
+@pytest.mark.parametrize(
     "test_spec",
     gather_tests(
         [
@@ -67,6 +68,7 @@ def gather_tests(specs_and_modules: List[Tuple[str, Any]]) -> List[Spec]:
             ("../nested_spec.json", nested),
             ("../typeof_spec.json", typeof),
             ("../generic_struct_spec.json", generic_struct),
+            ("../generic_sum_spec.json", generic_sum),
         ]
     ),
     ids=itemgetter("description"),

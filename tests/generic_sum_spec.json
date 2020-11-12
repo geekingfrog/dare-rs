@@ -1,0 +1,58 @@
+{
+  "description": "generic sum",
+  "schema": "generic_sum.dare",
+  "tests": {
+    "Wrap": [
+      {
+        "description": "valid Ok variant",
+        "valid": true,
+        "data": {
+          "result": {
+            "tag": "Ok",
+            "contents": "all is well"
+          }
+        }
+      },
+      {
+        "description": "valid Err variant",
+        "valid": true,
+        "data": {
+          "result": {
+            "tag": "Err",
+            "contents": 4
+          }
+        }
+      },
+      {
+        "description": "invalid tag",
+        "valid": false,
+        "data": {
+          "result": {
+            "tag": "loltag",
+            "contents": 4
+          }
+        }
+      },
+      {
+        "description": "invalid type for Ok variant",
+        "valid": false,
+        "data": {
+          "result": {
+            "tag": "Ok",
+            "contents": 3.14
+          }
+        }
+      },
+      {
+        "description": "invalid type for Err variant",
+        "valid": false,
+        "data": {
+          "result": {
+            "tag": "Err",
+            "contents": "not an int"
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+enum Result<OkType, ErrType> {
+  Ok(OkType),
+  Err(ErrType),
+}
+
+// at this point in time, alias aren't implemented yet
+// so generate a struct with a monomorphised sum for the field
+struct Wrap {
+  result: Result<String, Int>
+}

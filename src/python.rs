@@ -957,7 +957,16 @@ fn gen_py_sum_type(mut gen_ctx: &mut GenContext, e: &Enum) -> PyToken {
     // the union of all variants
     tokens.push(format!("{}TypeDef = ", e.name).into());
     tokens.push(typed_union(
-        e.variants.iter().map(|v| v.name.clone().into()).collect(),
+        e.variants.iter().map(|v| {
+            let mut toks = vec![v.name.clone().into()];
+            let tvs = v.value.get_type_vars();
+            if !tvs.is_empty() {
+                toks.push("[".into());
+                toks.push(tvs.join(", ").into());
+                toks.push("]".into());
+            }
+            PyToken::Block(toks)
+        }).collect(),
     ));
     tokens.push(PyToken::NewLine);
     tokens.push(PyToken::NewLine);
@@ -1091,17 +1100,27 @@ fn gen_from_json_enum(_gen_ctx: &GenContext, e: &Enum) -> PyToken {
                     "(ValidationError):".into(),
                     indent(1),
                 ]);
-                from_json_body
-                    .push(format!("return {}.from_json(contents", v.name.to_pascal_case()).into());
-                for tv in v.value.get_type_vars() {
-                    from_json_body.push(format!(", json_{}", tv).into());
-                }
+
+                // TODO use get_parse_function instead of that hardcoded stuff
+                // from_json_body.push(format!("return {}", v.value));
+
+                let tvs = v.value.get_type_vars();
+                if tvs.is_empty() {
+                    from_json_body.push(
+                        format!("return {}.from_json(contents", v.name.to_pascal_case()).into(),
+                    );
+                } else {
+                    from_json_body.push(
+                        format!("return {}._from_json(", v.name.to_pascal_case()).into(),
+                    );
+                    for tv in tvs {
+                        from_json_body.push(format!("parse_{}, ", tv).into());
+                    }
+                    from_json_body.push("contents".into());
+                };
+
                 from_json_body.push(")".into());
                 from_json_body.push(indent(-1));
-
-                //     format!("return {}.from_json(contents)", v.name.to_pascal_case()).into(),
-                //     indent(-1),
-                // ]);
             }
 
             from_json_body
@@ -1111,7 +1130,7 @@ fn gen_from_json_enum(_gen_ctx: &GenContext, e: &Enum) -> PyToken {
         }
     }
 
-    let mut from_json_args = vec!["cls".into(), typed_attr("data", vec!["Any".into()], None)];
+    let mut from_json_args = vec!["cls".into()];
 
     for tv in &e.type_parameters {
         from_json_args.push(PyToken::Block(vec![
@@ -1119,6 +1138,7 @@ fn gen_from_json_enum(_gen_ctx: &GenContext, e: &Enum) -> PyToken {
             gen_generic_parse_dump_hint(tv),
         ]));
     }
+    from_json_args.push(typed_attr("data", vec!["Any".into()], None));
 
     match json_directive.repr {
         JsonRepr::Union => from_json_args.push(typed_attr(
@@ -1129,14 +1149,33 @@ fn gen_from_json_enum(_gen_ctx: &GenContext, e: &Enum) -> PyToken {
         _ => {}
     };
 
+    let (from_json_name, from_json_result) = if e.type_parameters.is_empty() {
+        ("from_json", format!("\"{}TypeDef\"", e.name).into())
+    } else {
+        let type_params = e.type_parameters.join(", ");
+        (
+            "_from_json",
+            format!("\"{}TypeDef[{}]\"", e.name, type_params).into(),
+        )
+    };
+
+    let super_classes = if e.type_parameters.is_empty() {
+        vec![]
+    } else {
+        let mut toks = vec![type_import("Generic"), "[".into()];
+        toks.push(e.type_parameters.join(", ").into());
+        toks.push("]".into());
+        vec![PyToken::Block(toks)]
+    };
+
     PyToken::Block(py_class(
         &e.name.to_pascal_case(),
-        vec![],
+        super_classes,
         vec![
             "@classmethod".into(),
             PyToken::NewLine,
             PyToken::Block(py_fn(
-                "from_json",
+                from_json_name,
                 from_json_args,
                 vec![py_try(
                     PyToken::Block(from_json_body),
@@ -1149,7 +1188,7 @@ fn gen_from_json_enum(_gen_ctx: &GenContext, e: &Enum) -> PyToken {
                         ]),
                     )],
                 )],
-                Some(format!("{}TypeDef", e.name).into()),
+                Some(from_json_result),
             )),
         ],
     ))

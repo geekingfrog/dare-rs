@@ -37,6 +37,8 @@ def parse_bool(x: Any) -> bool:
 
 
 def parse_int(x: Any) -> int:
+    if x is True or x is False:
+        raise ValidationError(message="{} is not an integer".format(x))
     return parse_primitive(int, "Not a valid integer", x)
 
 
