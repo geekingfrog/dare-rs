@@ -21,6 +21,14 @@ impl TopDeclaration {
             TopDeclaration::Alias(a) => &a.name,
         }
     }
+
+    pub(crate) fn location(&self) -> SrcSpan {
+        match self {
+            TopDeclaration::Struct(s) => s.location,
+            TopDeclaration::Enum(e) => e.location,
+            TopDeclaration::Alias(a) => a.location,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -55,7 +63,14 @@ pub struct Enum {
 pub struct Alias {
     pub location: SrcSpan,
     pub name: String,
-    pub alias: RefType,
+    pub alias: AliasType,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum AliasType {
+    Atomic(AtomicType),
+    Reference(RefType),
+    Builtin(Builtin),
 }
 
 /// field1: Int,
@@ -119,8 +134,8 @@ impl Type {
                     let mut vs = v.get_type_vars();
                     ks.append(&mut vs);
                     ks
-                },
-            }
+                }
+            },
             Type::TypeParameter(t) => vec![t.clone()],
         }
     }
@@ -236,7 +251,7 @@ type TypeMappings<'a> = Vec<(&'a str, &'a str)>;
 
 /// Turn a Vec<ast::TopDeclaration> into a Vec<TopDeclaration> ready to be used
 /// for code generation
-pub fn from_parse_ast(decls: Vec<ast::TopDeclaration>) -> Result<Vec<TopDeclaration>> {
+pub fn to_gen_ast(decls: Vec<ast::TopDeclaration>) -> Result<Vec<TopDeclaration>> {
     let mut mappings = BTreeMap::new();
     decls.iter().map(|d| d.to_gen_ast(&mut mappings)).collect()
 }
@@ -246,7 +261,7 @@ impl ast::TopDeclaration {
         let result = match self {
             ast::TopDeclaration::Struct(s) => s.to_gen_ast(&mappings).map(TopDeclaration::Struct),
             ast::TopDeclaration::Enum(e) => e.to_gen_ast(&mappings).map(TopDeclaration::Enum),
-            ast::TopDeclaration::Alias(_) => todo!("alias not supported yet"),
+            ast::TopDeclaration::Alias(a) => a.to_gen_ast(&mappings).map(TopDeclaration::Alias),
         }?;
 
         // would be nice to avoid the result.clone()
@@ -307,6 +322,52 @@ impl ast::Enum {
             type_parameters: self.type_parameters.clone(),
             variants: variants?,
             directives: self.directives.clone(),
+        })
+    }
+}
+
+impl ast::Alias {
+    fn to_gen_ast(&self, mappings: &Mappings) -> Result<Alias> {
+        match mappings.get(&self.name) {
+            Some(top_decl) => {
+                return Err(anyhow!(
+                    "{} already declared at line {}",
+                    self.name,
+                    top_decl.location().start.line
+                ));
+            }
+            None => (),
+        };
+        let alias = match self.alias.to_gen_ast(&mappings, None, &BTreeSet::new())? {
+            Type::Atomic(a) => Ok(AliasType::Atomic(a)),
+            Type::Reference(r) => {
+                let v = Vec::new();
+                let target_typevars = match &*r.target {
+                    TopDeclaration::Struct(s) => &s.type_parameters,
+                    TopDeclaration::Enum(e) => &e.type_parameters,
+                    TopDeclaration::Alias(_) => &v,
+                };
+                if r.type_parameters.len() != target_typevars.len() {
+                    Err(anyhow!(
+                        "An alias must specify all type parameters. Expected {:?} but got {:?}",
+                        target_typevars,
+                        r.type_parameters
+                    ))
+                } else {
+                    Ok(AliasType::Reference(r))
+                }
+            }
+            Type::Builtin(b) => Ok(AliasType::Builtin(b)),
+            Type::TypeParameter(typs) => Err(anyhow!(
+                "Alias cannot have type paremeter. Found: {:?}",
+                typs
+            )),
+        }?;
+
+        Ok(Alias {
+            location: self.location,
+            name: self.name.clone(),
+            alias,
         })
     }
 }
@@ -423,7 +484,7 @@ impl ast::Type {
 
                 ref_type
                     .or(type_param)
-                    .ok_or(anyhow!("{} is not a valid reference to an existing type nor a type parameter in scope."))?
+                    .ok_or(anyhow!("{} is not a valid reference to an existing type nor a type parameter in scope.", r.name))?
             }
 
             ast::Type::Builtin(b) => {
@@ -481,7 +542,7 @@ mod test {
             ))
             .unwrap();
 
-        let exprs = from_parse_ast(decls).unwrap();
+        let exprs = to_gen_ast(decls).unwrap();
 
         match &exprs[1] {
             TopDeclaration::Struct(s) => match &s.fields[1].typ {

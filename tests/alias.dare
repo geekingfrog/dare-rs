@@ -1,0 +1,32 @@
+// type MyString String;
+// type ListOfInt [Int];
+// enum Result<OkType, ErrType> {...};
+// struct Foo<T> {field_t: T};
+// type MyResult Result<String, Int>;
+// type FooInt Foo<Int>;
+
+// there are no specs for these alias since the newtype
+// mechanism doesn't generate anything for python
+type MyString String;
+type ListOfInt [Int];
+type OptInt Int?;
+
+struct SimpleFoo {
+  simple_field: String
+}
+
+type StructCopy SimpleFoo
+
+// enum Result<OkType, ErrType> {
+//   Ok(OkType),
+//   Err(ErrType),
+// }
+
+// type MyResult Result<String, Int>
+
+
+// Should the following declaration be allowed? (so far it is not)
+// type MyResult<T> Result<T, Int>
+
+// Also, is the following valid?
+// type MyResult Result<T, Int>

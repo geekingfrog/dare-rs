@@ -1,0 +1,14 @@
+struct PolyFoo<T> {
+  poly_field: T
+}
+
+type FooString PolyFoo<String>
+type FooNested PolyFoo<PolyFoo<Int>>
+
+struct MultiFoo<U, V> {
+  field_u: U,
+  field_v: V
+}
+
+type IntString MultiFoo<Int, String>
+type IntBytes MultiFoo<Float, Bytes>

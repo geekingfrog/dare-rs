@@ -16,6 +16,8 @@ from dare import (
     typeof,
     generic_struct,
     generic_sum,
+    alias,
+    generic_alias
 )
 from typing import Any, List, Tuple, TypedDict, cast
 
@@ -69,6 +71,8 @@ def gather_tests(specs_and_modules: List[Tuple[str, Any]]) -> List[Spec]:
             ("../typeof_spec.json", typeof),
             ("../generic_struct_spec.json", generic_struct),
             ("../generic_sum_spec.json", generic_sum),
+            ("../alias_spec.json", alias),
+            ("../generic_alias_spec.json", generic_alias),
         ]
     ),
     ids=itemgetter("description"),

@@ -1,0 +1,27 @@
+{
+  "description": "aliases without any generics involved",
+  "schema": "alias.dare",
+  "tests": {
+    "StructCopy": [
+      {
+        "description": "valid struct",
+        "valid": true,
+        "data": {
+          "simple_field": "hello"
+        }
+      },
+      {
+        "description": "null data is invalid",
+        "valid": false,
+        "data": null
+      },
+      {
+        "description": "invalid type for field",
+        "valid": false,
+        "data": {
+          "simple_field": true
+        }
+      }
+    ]
+  }
+}

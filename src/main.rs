@@ -34,7 +34,7 @@ fn main() {
 
     let f = File::open(&opt.schema).unwrap();
     let raw_ast = parse(&f).unwrap();
-    let validated_ast = gen_ast::from_parse_ast(raw_ast).unwrap();
+    let validated_ast = gen_ast::to_gen_ast(raw_ast).unwrap();
 
     let py_tokens = python::gen_python(&validated_ast[..]);
 

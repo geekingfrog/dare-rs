@@ -1,12 +1,13 @@
 use crate::ast::{Directives, JsonDirective, JsonRepr};
 use crate::gen_ast;
 use crate::gen_ast::{
-    Alias, AtomicType, Builtin, Enum, EnumVariant, FieldType, Struct, TopDeclaration, Type,
-    VariantValue,
+    Alias, AliasType, AtomicType, Builtin, Enum, EnumVariant, Field, FieldType, RefType, Struct,
+    TopDeclaration, Type, VariantValue,
 };
 use inflections::Inflect;
 use std::collections::{BTreeMap, BTreeSet};
 use std::convert::From;
+use std::rc::Rc;
 
 pub const SRC_PYTHON_PRELUDE: &'static str = include_str!("prelude.py");
 
@@ -85,7 +86,7 @@ fn gen_python_top_decl(
     let decl_tokens = match decl {
         TopDeclaration::Struct(s) => gen_py_struct(&mut gen_ctx, s),
         TopDeclaration::Enum(e) => gen_py_enum(&mut gen_ctx, e),
-        TopDeclaration::Alias(a) => gen_py_alias(a),
+        TopDeclaration::Alias(a) => gen_py_alias(&mut gen_ctx, a),
     };
     tokens.extend(decl_tokens);
     tokens.push(PyToken::NewLine);
@@ -386,8 +387,105 @@ fn gen_generic_parse_dump_hint(tv: &str) -> PyToken {
     PyToken::Block(tokens)
 }
 
-fn gen_py_alias(_a: &Alias) -> Vec<PyToken> {
-    todo!("gen py alias")
+fn gen_py_alias(mut gen_ctx: &mut GenContext, a: &Alias) -> Vec<PyToken> {
+    let name = a.name.to_pascal_case();
+    match &a.alias {
+        AliasType::Atomic(at) => {
+            let py_typ = atomic_py_instance(&at).0;
+            vec![
+                format!("{} = ", name).into(),
+                type_import("NewType"),
+                format!(r#"("{}", {})"#, name, py_typ).into(),
+            ]
+        }
+        AliasType::Reference(r) => match resolve_final_reference(&r) {
+            TopDeclaration::Struct(s) => gen_alias_struct(&mut gen_ctx, &a, &r, &s),
+            TopDeclaration::Enum(_) => todo!(),
+            TopDeclaration::Alias(_) => unreachable!(),
+        },
+        AliasType::Builtin(b) => {
+            match b {
+                Builtin::List(t) => vec![
+                    format!("{} = ", name).into(),
+                    type_import("NewType"),
+                    format!(r#"("{}", "#, name).into(),
+                    type_import("List"),
+                    "[".into(),
+                    t.get_python_type(&gen_ctx),
+                    "])".into(),
+                ],
+                Builtin::Optional(t) => {
+                    // Argument 2 to NewType(...) must be subclassable
+                    // which is not the case for Optional[x]  :/
+                    vec![
+                        format!("{} = ", name).into(),
+                        type_import("Union"),
+                        "[None, ".into(),
+                        t.get_python_type(&gen_ctx),
+                        "]".into(),
+                    ]
+                }
+                Builtin::Map(_, _) => todo!("map alias"),
+            }
+        }
+    }
+}
+
+/// Follow any alias until a non-alias top declaration is found
+/// Since dare doesn't support out of order declaration nor recursive
+/// types, there cannot be an infinite cycle when resolving references.
+fn resolve_final_reference(r: &RefType) -> &TopDeclaration {
+    match &*r.target {
+        TopDeclaration::Struct(_) | TopDeclaration::Enum(_) => &r.target,
+        TopDeclaration::Alias(a) => match &a.alias {
+            AliasType::Atomic(_) | AliasType::Builtin(_) => &r.target,
+            AliasType::Reference(r2) => resolve_final_reference(&r2),
+        },
+    }
+}
+
+/// Generate a monomorphised variant of the aliased struct (or a dumb copy
+/// if the original struct has no type parameter). This is to allow different types, but
+/// the same behavior and from/to json functions
+fn gen_alias_struct(
+    mut gen_ctx: &mut GenContext,
+    a: &Alias,
+    r: &RefType,
+    s: &Struct,
+) -> Vec<PyToken> {
+    // By that point, all type parameters are already validated, so we
+    // can zip and build a hashmap where everything matches.
+    let typevar_mapping: BTreeMap<_, _> = s
+        .type_parameters
+        .iter()
+        .zip(r.type_parameters.iter())
+        .collect();
+    dbg!("typevar mapping: {:#?}", typevar_mapping.clone());
+    let fields = s
+        .fields
+        .iter()
+        .map(|f| match &f.typ {
+            FieldType::TypeOf(_) => f.clone(),
+            FieldType::Type(t) => match t {
+                Type::TypeParameter(typevar_name) => {
+                    let field_typ = *typevar_mapping.get(&typevar_name).unwrap();
+                    Field {
+                        typ: FieldType::Type(field_typ.clone()),
+                        ..f.clone()
+                    }
+                }
+                _ => f.clone(),
+            },
+        })
+        .collect();
+
+    let s = Struct {
+        location: a.location,
+        name: a.name.clone(),
+        type_parameters: vec![],
+        fields,
+    };
+    gen_py_struct(&mut gen_ctx, &s)
 }
 
 fn gather_imports(tokens: &[PyToken]) -> ImportMap {
@@ -895,16 +993,19 @@ fn gen_py_sum_type(mut gen_ctx: &mut GenContext, e: &Enum) -> PyToken {
     // the union of all variants
     tokens.push(format!("{}TypeDef = ", e.name).into());
     tokens.push(typed_union(
-        e.variants.iter().map(|v| {
-            let mut toks = vec![v.name.clone().into()];
-            let tvs = v.value.get_type_vars();
-            if !tvs.is_empty() {
-                toks.push("[".into());
-                toks.push(tvs.join(", ").into());
-                toks.push("]".into());
-            }
-            PyToken::Block(toks)
-        }).collect(),
+        e.variants
+            .iter()
+            .map(|v| {
+                let mut toks = vec![v.name.clone().into()];
+                let tvs = v.value.get_type_vars();
+                if !tvs.is_empty() {
+                    toks.push("[".into());
+                    toks.push(tvs.join(", ").into());
+                    toks.push("]".into());
+                }
+                PyToken::Block(toks)
+            })
+            .collect(),
     ));
     tokens.push(PyToken::NewLine);
     tokens.push(PyToken::NewLine);
@@ -981,11 +1082,18 @@ fn gen_from_json_enum(_gen_ctx: &GenContext, e: &Enum) -> PyToken {
                 if arg.is_empty() {
                     format!("return {}({})", variant.name.to_pascal_case(), arg).into()
                 } else {
-                    let mut return_toks =
-                        vec![
-                            format!("return {}.from_json({}", variant.name.to_pascal_case(), arg)
-                                .into(),
-                        ];
+                    let fn_name = if variant.value.get_type_vars().is_empty() {
+                        "from_json"
+                    } else {
+                        "_from_json"
+                    };
+                    let mut return_toks = vec![format!(
+                        "return {}.{}({}",
+                        variant.name.to_pascal_case(),
+                        fn_name,
+                        arg
+                    )
+                    .into()];
 
                     for tv in variant.value.get_type_vars() {
                         return_toks.push(format!(", json_{}", tv).into());
@@ -1048,9 +1156,8 @@ fn gen_from_json_enum(_gen_ctx: &GenContext, e: &Enum) -> PyToken {
                         format!("return {}.from_json(contents", v.name.to_pascal_case()).into(),
                     );
                 } else {
-                    from_json_body.push(
-                        format!("return {}._from_json(", v.name.to_pascal_case()).into(),
-                    );
+                    from_json_body
+                        .push(format!("return {}._from_json(", v.name.to_pascal_case()).into());
                     for tv in tvs {
                         from_json_body.push(format!("parse_{}, ", tv).into());
                     }
@@ -1145,9 +1252,6 @@ fn gen_enum_variant(
     );
 
     tokens.push(PyToken::NewLine);
-
-    // let (td_name, json_type) = gen_enum_variant_json_type(&mut gen_ctx, variant, directives);
-    // tokens.push(json_type);
 
     tokens.push(PyToken::NewLine);
     tokens.push(PyToken::NewLine);
@@ -1471,8 +1575,14 @@ fn gen_enum_variant_from_json(
 
                 from_json_body.push("@classmethod".into());
                 from_json_body.push(PyToken::NewLine);
+                let fn_name = if variant.value.get_type_vars().is_empty() {
+                    "from_json"
+                } else {
+                    "_from_json"
+                };
+
                 from_json_body.extend(py_fn(
-                    "from_json".into(),
+                    fn_name.into(),
                     vec![
                         "cls".into(),
                         typed_attr("data", vec![type_import("Any")], None),

@@ -1,0 +1,106 @@
+{
+  "description": "aliases with generics involved",
+  "schema": "generic_alias.dare",
+  "tests": {
+    "FooString": [
+      {
+        "description": "valid struct",
+        "valid": true,
+        "data": {
+          "poly_field": "hello"
+        }
+      },
+      {
+        "description": "null data is invalid",
+        "valid": false,
+        "data": null
+      },
+      {
+        "description": "invalid type for field",
+        "valid": false,
+        "data": {
+          "poly_field": true
+        }
+      }
+    ],
+    "FooNested": [
+      {
+        "description": "valid struct",
+        "valid": true,
+        "data": {
+          "poly_field": {
+            "poly_field": 42
+          }
+        }
+      },
+      {
+        "description": "invalid first level of nesting",
+        "valid": false,
+        "data": {
+          "poly_field": 42
+        }
+      },
+      {
+        "description": "invalid second level of nesting",
+        "valid": false,
+        "data": {
+          "poly_field": {
+            "poly_field": "not a number"
+          }
+        }
+      }
+    ],
+    "IntString": [
+      {
+        "description": "valid struct with two type parameters",
+        "valid": true,
+        "data": {
+          "field_u": 2,
+          "field_v": "hello"
+        }
+      },
+      {
+        "description": "invalid struct - swapped types",
+        "valid": false,
+        "data": {
+          "field_u": "hello",
+          "field_v": 2
+        }
+      },
+      {
+        "description": "invalid struct - invalid first type",
+        "valid": false,
+        "data": {
+          "field_u": "hello",
+          "field_v": true
+        }
+      },
+      {
+        "description": "invalid struct - invalid second type",
+        "valid": false,
+        "data": {
+          "field_u": 42,
+          "field_v": true
+        }
+      }
+    ],
+    "IntBytes": [
+      {
+        "description": "valid struct with two type parameters",
+        "valid": true,
+        "data": {
+          "field_u": 42.4,
+          "field_v": "ZGVhZGJlZWY="
+        }
+      },
+      {
+        "description": "invalid struct - swapped types",
+        "valid": false,
+        "data": {
+          "field_u": "ZGVhZGJlZWY=",
+          "field_v": 42.4
+        }
+      }
+    ]
+  }
+}

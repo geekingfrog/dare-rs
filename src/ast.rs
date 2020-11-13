@@ -100,7 +100,7 @@ pub enum VariantValue {
 // }
 
 /// A type can be atomic (String, Bool, Int…), a reference to another type
-/// (Foo, Bar<T>, Map<String, Int>), or a generic type like `T` or `errorType`.
+/// (Foo, Bar<T>, Map<String, Int>), or a generic type like `T` or `ErrorType`.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Type {
     /// One of the basic atomic type
