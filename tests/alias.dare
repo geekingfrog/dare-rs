@@ -17,16 +17,11 @@ struct SimpleFoo {
 
 type StructCopy SimpleFoo
 
-// enum Result<OkType, ErrType> {
-//   Ok(OkType),
-//   Err(ErrType),
-// }
+enum Base {
+  A,
+  C,
+  G,
+  T,
+}
 
-// type MyResult Result<String, Int>
-
-
-// Should the following declaration be allowed? (so far it is not)
-// type MyResult<T> Result<T, Int>
-
-// Also, is the following valid?
-// type MyResult Result<T, Int>
+type OtherBase Base

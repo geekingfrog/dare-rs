@@ -5,7 +5,6 @@
 
 import json
 import pytest
-from operator import itemgetter
 from dare import (
     atomic_struct,
     simple_enum,
@@ -17,7 +16,7 @@ from dare import (
     generic_struct,
     generic_sum,
     alias,
-    generic_alias
+    generic_alias,
 )
 from typing import Any, List, Tuple, TypedDict, cast
 
@@ -75,7 +74,9 @@ def gather_tests(specs_and_modules: List[Tuple[str, Any]]) -> List[Spec]:
             ("../generic_alias_spec.json", generic_alias),
         ]
     ),
-    ids=itemgetter("description"),
+    ids=lambda x: "{} - {}".format(
+        x["module"].__name__.split(".", 1), x["description"]
+    ),
 )
 def test_specs(test_spec: Spec) -> None:
 

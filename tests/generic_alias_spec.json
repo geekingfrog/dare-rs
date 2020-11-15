@@ -101,6 +101,55 @@
           "field_v": 42.4
         }
       }
+    ],
+    "MyResult": [
+      {
+        "description": "Valid alias for polymorphic sum type, first variant",
+        "valid": true,
+        "data": {
+          "tag": "Ok",
+          "contents": "hello"
+        }
+      },
+      {
+        "description": "Valid alias for polymorphic sum type, second variant",
+        "valid": true,
+        "data": {
+          "tag": "Err",
+          "contents": 42
+        }
+      },
+      {
+        "description": "Invalid alias for polymorphic sum type, null",
+        "valid": false,
+        "data": null
+      },
+      {
+        "description": "Invalid alias for polymorphic sum type, first variant",
+        "valid": false,
+        "data": {
+          "tag": "Ok",
+          "contents": false
+        }
+      },
+      {
+        "description": "Invalid alias for polymorphic sum type, second variant",
+        "valid": false,
+        "data": {
+          "tag": "Err",
+          "contents": "not a number"
+        }
+      }
+    ],
+    "NestedResult": [
+      {
+        "description": "Valid alias for polymorphic sum type, with nested type",
+        "valid": true,
+        "data": {
+          "tag": "Err",
+          "contents": [null, 2]
+        }
+      }
     ]
   }
 }

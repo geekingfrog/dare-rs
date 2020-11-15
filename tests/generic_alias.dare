@@ -12,3 +12,11 @@ struct MultiFoo<U, V> {
 
 type IntString MultiFoo<Int, String>
 type IntBytes MultiFoo<Float, Bytes>
+
+enum Result<OkType,ErrType> {
+  Ok(OkType),
+  Err(ErrType),
+}
+
+type MyResult Result<String, Int>
+type NestedResult Result<String, [Int?]>

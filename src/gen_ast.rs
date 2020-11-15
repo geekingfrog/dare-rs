@@ -116,31 +116,6 @@ pub enum Type {
     TypeParameter(String),
 }
 
-impl Type {
-    pub fn get_type_vars(&self) -> Vec<String> {
-        match &self {
-            Type::Atomic(_) => Vec::new(),
-            Type::Reference(r) => r
-                .type_parameters
-                .iter()
-                .map(|t| t.get_type_vars())
-                .flatten()
-                .collect(),
-            Type::Builtin(b) => match b {
-                Builtin::List(t) => t.get_type_vars(),
-                Builtin::Optional(o) => o.get_type_vars(),
-                Builtin::Map(k, v) => {
-                    let mut ks = k.get_type_vars();
-                    let mut vs = v.get_type_vars();
-                    ks.append(&mut vs);
-                    ks
-                }
-            },
-            Type::TypeParameter(t) => vec![t.clone()],
-        }
-    }
-}
-
 impl Enum {
     /// returns true if the sum type is actually a simple enum,
     /// that is, only has variants with only constructor and no
@@ -215,15 +190,6 @@ impl VariantValue {
         match &self {
             VariantValue::OnlyCtor => true,
             _ => false,
-        }
-    }
-
-    pub fn get_type_vars(&self) -> Vec<String> {
-        match &self {
-            VariantValue::OnlyCtor => Vec::new(),
-            VariantValue::PositionalCtor(typs) => {
-                typs.iter().map(|t| t.get_type_vars()).flatten().collect()
-            }
         }
     }
 }
