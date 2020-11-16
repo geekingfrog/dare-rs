@@ -3,8 +3,13 @@ struct Customer {
   customerEmail: String?,
   age: Int,
   nicks: [[String]],
+  key: Bytes
 }
 
 struct Student {
   marks: Map<String, List<Int>>,
+}
+
+struct Reversed {
+  reversed: Map<Int, [String]>
 }

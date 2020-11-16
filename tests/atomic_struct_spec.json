@@ -23,7 +23,8 @@
               "two",
               "three"
             ]
-          ]
+          ],
+          "key": "YmFy"
         }
       },
       {
@@ -33,7 +34,8 @@
           "name": "Charlie",
           "customerEmail": null,
           "age": 42,
-          "nicks": []
+          "nicks": [],
+          "key": "YmFy"
         }
       },
       {
@@ -41,7 +43,8 @@
         "valid": false,
         "data": {
           "name": "Charlie",
-          "nicks": []
+          "nicks": [],
+          "key": "YmFy"
         }
       },
       {
@@ -50,7 +53,10 @@
         "data": {
           "name": "Charlie",
           "age": 12,
-          "nicks": ["hello"]
+          "nicks": [
+            "hello"
+          ],
+          "key": "YmFy"
         }
       },
       {
@@ -59,20 +65,35 @@
         "data": {
           "name": "Charlie",
           "age": 12,
-          "nicks": [[42]]
+          "nicks": [
+            [
+              42
+            ]
+          ],
+          "key": "YmFy"
+        }
+      },
+      {
+        "description": "Invalid bytes",
+        "valid": false,
+        "data": {
+          "name": "Charlie",
+          "age": 12,
+          "nicks": [],
+          "key": "YmFylolilol"
         }
       }
     ],
     "Student": [
       {
-        "description": "valid empty map",
+        "description": "valid empty object",
         "valid": true,
         "data": {
           "marks": {}
         }
       },
       {
-        "description": "valid map with some entries",
+        "description": "valid object with some entries",
         "valid": true,
         "data": {
           "marks": {
@@ -94,6 +115,22 @@
               "oops"
             ]
           }
+        }
+      }
+    ],
+    "Reversed": [
+      {
+        "description": "valid map",
+        "valid": true,
+        "data": {
+          "reversed": [
+            [
+              2,
+              [
+                "math"
+              ]
+            ]
+          ]
         }
       }
     ]

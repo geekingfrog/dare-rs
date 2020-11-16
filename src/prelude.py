@@ -87,6 +87,37 @@ def parse_singleton(parse: Callable[[Any], V], l: Any) -> V:
     return parsed[0]
 
 
+def parse_object(parse_val: Callable[[Any], V], x: Any) -> Dict[str, V]:
+    errors: Dict[str, Any] = {}
+    result = {}
+
+    if not isinstance(x, dict):
+        raise ValidationError(
+            message="Expected a dictionnary but got {}".format(type(x))
+        )
+
+    for k, v in x.items():
+        try:
+            key = parse_str(k)
+        except ValidationError as e:
+            errors[k] = {"key": e.messages}
+
+        try:
+            val = parse_val(v)
+        except ValidationError as e:
+            if k not in errors:
+                errors[k] = {}
+            errors[k]["value"] = e.messages
+
+        if k not in errors:
+            result[key] = val
+
+    if errors:
+        raise ValidationError(message=errors)
+
+    return result
+
+
 def parse_map(
     parse_key: Callable[[Any], K], parse_val: Callable[[Any], V], x: Any
 ) -> Dict[K, V]:
@@ -94,54 +125,40 @@ def parse_map(
     Parse a map out of a json dict, or a list of pairs.
     """
 
-    errors = {}
+    errors: Dict[str, Any] = {}
     result = {}
 
-    if isinstance(x, dict):
-        for k, v in x.items():
+    if not isinstance(x, list):
+        raise ValidationError(
+            message="Expected a dictionnary or array of tuple but got {}".format(
+                type(x)
+            )
+        )
+
+    for idx, val in enumerate(x):
+        if not isinstance(val, list):
+            errors[str(idx)] = {"value": ["Not a list"]}
+        elif len(val) != 2:
+            errors[str(idx)] = {
+                "value": ["List must have 2 elements (one key, one value)"]
+            }
+        else:
+            stridx = str(idx)
+            k, v = val
             try:
                 key = parse_key(k)
             except ValidationError as e:
-                errors[k] = {"key": e.messages}
+                errors[stridx] = {"key": e.messages}
 
             try:
                 val = parse_val(v)
             except ValidationError as e:
                 if k not in errors:
-                    errors[k] = {}
-                errors[k]["value"] = e.messages
+                    errors[stridx] = {}
+                errors[stridx]["value"] = e.messages
 
-            if k not in errors:
+            if stridx not in errors:
                 result[key] = val
-
-    elif isinstance(x, list):
-        for idx, val in enumerate(x):
-            if not isinstance(val, list):
-                errors[str(idx)] = {"value": ["Not a list"]}
-            elif len(val) != 2:
-                errors[str(idx)] = {
-                    "value": ["List must have 2 elements (one key, one value)"]
-                }
-            else:
-                stridx = str(idx)
-                k, v = val
-                try:
-                    key = parse_key(k)
-                except ValidationError as e:
-                    errors[stridx] = {"key": e.messages}
-
-                try:
-                    val = parse_val(v)
-                except ValidationError as e:
-                    if k not in errors:
-                        errors[stridx] = {}
-                    errors[stridx]["value"] = e.messages
-
-                if stridx not in errors:
-                    result[key] = val
-
-    else:
-        raise ValidationError(message="Not a dictionnary or array of tuple")
 
     if errors:
         raise ValidationError(message=errors)
@@ -164,6 +181,18 @@ def dump_list(dump_item: Callable[[T], Any], v: List[T]) -> List[Any]:
 
 def dump_object(dump_item: Callable[[T], Any], d: Dict[str, T]) -> Dict[str, Any]:
     return {k: dump_item(v) for k, v in d.items()}
+
+
+# d: Any, because mypy isn't smart enough and choke on some usages of dump_map
+# For example, in `dump_map(identity, identity, x)`, `identity` has a different
+# type on each callsite, but mypy unify the type and infer that x must be of
+# type Dict[T, T] where it should be Dict[K, V]
+# So instead of fighting that, just slap an Any, and assume it's going to work out fine
+# (with some tests)
+def dump_map(
+    dump_key: Callable[[K], Any], dump_val: Callable[[V], Any], d: Any
+) -> List[Any]:
+    return [[dump_key(k), dump_val(v)] for k, v in d.items()]
 
 
 def identity(x: T) -> T:
@@ -195,9 +224,13 @@ def get_dump_function(x: T) -> Callable[[T], Any]:
     if isinstance(x, collections.abc.Mapping):
         if not x:
             return identity
-        # assume all keys have the same type (true for dare)
-        dump = get_dump_function(x[next(iter(x))])
-        return lambda x: dump_object(lambda x2: dump(x2), x)  # type: ignore
+        # assume all keys and values have the same type (true for dare)
+        first_key, first_item = next(iter(x.items()))
+        dump_val = get_dump_function(first_item)
+        if type(first_item) == str:
+            return lambda x: dump_object(lambda x2: dump_val(x2), x)  # type: ignore
+        dump_key = get_dump_function(first_key)
+        return lambda x: dump_map(dump_key, dump_val, x)
 
     if isinstance(x, bytes):
         return dump_bytes  # type: ignore

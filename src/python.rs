@@ -1,13 +1,12 @@
 use crate::ast::{Directives, JsonDirective, JsonRepr};
 use crate::gen_ast;
 use crate::gen_ast::{
-    Alias, AliasType, AtomicType, Builtin, Enum, EnumVariant, Field, FieldType, RefType, Struct,
+    Alias, AliasType, AtomicType, Builtin, Enum, EnumVariant, FieldType, RefType, Struct,
     TopDeclaration, Type, VariantValue,
 };
 use inflections::Inflect;
 use std::collections::{BTreeMap, BTreeSet};
 use std::convert::From;
-use std::rc::Rc;
 
 pub const SRC_PYTHON_PRELUDE: &'static str = include_str!("prelude.py");
 
@@ -96,8 +95,6 @@ fn gen_python_top_decl(
 
 fn gen_py_struct(mut gen_ctx: &mut GenContext, s: &Struct) -> Vec<PyToken> {
     let mut tokens = Vec::new();
-    let struct_td_name = format!("{}JSON", s.name);
-
     let mut body = vec![];
 
     // Generate the class attribute with their type
@@ -133,8 +130,8 @@ fn gen_py_struct(mut gen_ctx: &mut GenContext, s: &Struct) -> Vec<PyToken> {
 
     let any = type_import("Any");
     let abc_mapping = PyToken::Import(
-        PyImport::Full("collections".to_owned()),
-        Some("abc.Mapping".to_owned()),
+        PyImport::Specific("collections".to_string(), "abc".to_string()),
+        Some("Mapping".to_string()),
     );
 
     let mut from_json_args = vec!["cls".into()];
@@ -447,12 +444,7 @@ fn resolve_final_reference(r: &RefType) -> &TopDeclaration {
 /// Generate a monomorphised variant of the aliased struct (or a dumb copy
 /// if the original struct has no type parameter). This is to allow different types, but
 /// the same behavior and from/to json functions
-fn gen_alias_struct(
-    gen_ctx: &GenContext,
-    a: &Alias,
-    r: &RefType,
-    s: &Struct,
-) -> Vec<PyToken> {
+fn gen_alias_struct(gen_ctx: &GenContext, a: &Alias, r: &RefType, s: &Struct) -> Vec<PyToken> {
     let mut superclass = s.name.clone();
     if !r.type_parameters.is_empty() {
         superclass += "[";
@@ -671,19 +663,40 @@ impl PythonJSON for Type {
                         }
                     }
                 }
-                Builtin::Map(_k, v) => {
-                    // TODO check if the type for the key can be serialised as a string
-                    match v.get_dump_function(&gen_ctx, name, depth + 1) {
-                        Some(f) => {
-                            if depth == 0 {
-                                Some(format!("dump_object({}, {})", f, name))
-                            } else {
-                                Some(format!("lambda x{}: dump_object({}, x{})", depth, f, depth))
+                Builtin::Map(k, v) => match **k {
+                    Type::Atomic(AtomicType::Str) => {
+                        match v.get_dump_function(&gen_ctx, name, depth + 1) {
+                            Some(f) => {
+                                if depth == 0 {
+                                    Some(format!("dump_object({}, {})", f, name))
+                                } else {
+                                    Some(format!(
+                                        "lambda x{}: dump_object({}, x{})",
+                                        depth, f, depth
+                                    ))
+                                }
                             }
+                            None => None,
                         }
-                        None => None,
                     }
-                }
+                    _ => {
+                        let dump_k = k
+                            .get_dump_function(&gen_ctx, name, depth + 1)
+                            .unwrap_or("identity".to_string());
+                        let dump_v = v
+                            .get_dump_function(&gen_ctx, name, depth + 1)
+                            .unwrap_or("identity".to_string());
+
+                        if depth == 0 {
+                            Some(format!("dump_map({}, {}, {})", dump_k, dump_v, name))
+                        } else {
+                            Some(format!(
+                                "lambda x{}: dump_map({}, {}, x{})",
+                                depth, dump_k, dump_v, depth
+                            ))
+                        }
+                    }
+                },
             },
             Type::Reference(r) => {
                 // let referenced_decl = &gen_ctx.top_declarations[r.name];
@@ -735,13 +748,17 @@ impl PythonJSON for Type {
                         format!("lambda x{}: parse_list({}, x{})", depth, nested, depth)
                     }
                 }
-                Builtin::Map(key_type, val_type) => {
-                    let parse_key_fn =
-                        key_type.get_parse_function(&gen_ctx, "key_name?", depth + 1);
-                    let parse_val_fn =
-                        val_type.get_parse_function(&gen_ctx, "val_name?", depth + 1);
-                    format!("parse_map({}, {}, {})", parse_key_fn, parse_val_fn, name)
-                }
+                Builtin::Map(key_type, val_type) => match **key_type {
+                    Type::Atomic(AtomicType::Str) => {
+                        let parse_val_fn = val_type.get_parse_function(&gen_ctx, "", depth + 1);
+                        format!("parse_object({}, {})", parse_val_fn, name)
+                    }
+                    _ => {
+                        let parse_key_fn = key_type.get_parse_function(&gen_ctx, "", depth + 1);
+                        let parse_val_fn = val_type.get_parse_function(&gen_ctx, "", depth + 1);
+                        format!("parse_map({}, {}, {})", parse_key_fn, parse_val_fn, name)
+                    }
+                },
             },
             Type::Reference(r) => {
                 let referenced_decl = r.target.as_ref();

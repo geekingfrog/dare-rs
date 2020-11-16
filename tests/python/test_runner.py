@@ -75,7 +75,7 @@ def gather_tests(specs_and_modules: List[Tuple[str, Any]]) -> List[Spec]:
         ]
     ),
     ids=lambda x: "{} - {}".format(
-        x["module"].__name__.split(".", 1), x["description"]
+        x["module"].__name__.split(".", 1)[1], x["description"]
     ),
 )
 def test_specs(test_spec: Spec) -> None:
