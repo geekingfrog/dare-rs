@@ -157,9 +157,9 @@ pub struct RefType {
     pub type_parameters: Vec<Type>,
     pub target: Rc<TopDeclaration>,
 
-    // Populated from a #[typeof(…)] field when an Enum
-    // is embedded into a Struct
-    // Used for efficient parsing
+    /// Populated from a #[typeof(…)] field when an Enum
+    /// is embedded into a Struct
+    /// Used for efficient parsing
     pub variant_hint: Option<String>,
 }
 

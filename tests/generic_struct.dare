@@ -8,6 +8,7 @@ struct FooInt {
 
 struct Bar<U, V> {
   field_u: U,
+  // TODO wrap that Foo into an Optional or a List to test some more nesting
   field_foo: Foo<V?>,
 }
 

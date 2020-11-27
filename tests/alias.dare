@@ -17,6 +17,11 @@ struct SimpleFoo {
 
 type StructCopy SimpleFoo
 
+struct StructWithNewtype {
+  field_string: MyString,
+  field_optint: OptInt,
+}
+
 enum Base {
   A,
   C,

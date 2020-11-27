@@ -1,5 +1,5 @@
 from dare.json_directives import EnumUnion, UnionSimple1, UnionString
-from dare import nested, typeof, simple_sum, generic_struct, generic_sum, alias
+from dare import nested, typeof, simple_sum, generic_struct, generic_sum
 from typing import NewType
 
 

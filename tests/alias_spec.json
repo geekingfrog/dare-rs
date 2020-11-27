@@ -23,6 +23,32 @@
         }
       }
     ],
+    "StructWithNewtype": [
+      {
+        "description": "valid struct with newtype for fields",
+        "valid": true,
+        "data": {
+          "field_string": "hello",
+          "field_optint": null
+        }
+      },
+      {
+        "description": "struct with newtype for fields - invalid first type",
+        "valid": false,
+        "data": {
+          "field_string": null,
+          "field_optint": null
+        }
+      },
+      {
+        "description": "struct with newtype for fields - invalid second type",
+        "valid": false,
+        "data": {
+          "field_string": "hello",
+          "field_optint": "not a number"
+        }
+      }
+    ],
     "OtherBase": [
       {
         "description": "valid simple enum",

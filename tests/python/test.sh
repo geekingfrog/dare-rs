@@ -13,7 +13,7 @@ cargo run -- --schema "../typeof.dare" --target-dir ./dare
 cargo run -- --schema "../generic_struct.dare" --target-dir ./dare
 cargo run -- --schema "../generic_sum.dare" --target-dir ./dare
 cargo run -- --schema "../alias.dare" --target-dir ./dare
-cargo run -- --schema "../generic_alias.dare" --target-dir ./dare
+# cargo run -- --schema "../generic_alias.dare" --target-dir ./dare
 
 if [ ! -d ./venv ]; then
   python -m venv venv

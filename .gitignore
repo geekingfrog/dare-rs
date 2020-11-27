@@ -1,3 +1,5 @@
 /target
-src/dare.rs
 __pycache__
+
+# generated code from lalrpop
+src/dare.rs

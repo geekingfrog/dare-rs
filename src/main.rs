@@ -38,7 +38,6 @@ fn main() {
 
     let py_tokens = python::gen_python(&validated_ast[..]);
 
-    println!("{}", python::render_python(&py_tokens));
 
     let mut dest_path_default = opt.schema.clone();
     dest_path_default.pop();

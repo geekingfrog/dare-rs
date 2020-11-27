@@ -177,21 +177,52 @@ fn gen_py_struct(mut gen_ctx: &mut GenContext, s: &Struct) -> Vec<PyToken> {
             FieldType::Type(_) => (),
         };
 
-        // TODO: perhaps only put the type hint when there are generics involved
-        // in this case they are required for mypy not to get confused
-        let try_body = PyToken::Block(vec![
-            format!("{}: ", field.name).into(),
-            field.typ.get_python_type(&gen_ctx),
-            format!(
-                " = {}",
-                field.typ.get_parse_function(
-                    &gen_ctx,
-                    &format!(r#"data.get("{}")"#, field.name),
-                    0
+        // The `cast` is required only in some cases.
+        // Whenever the parse function returns something with a lambda inside,
+        // mypy cannot infer the type of lambdas, so a cast is required.
+        // However, slapping a cast everywhere doesn't work since mypy in strict
+        // mode will complain about "Redundant cast to …"
+        let require_cast = match &field.typ {
+            FieldType::Type(Type::Builtin(_)) => true,
+            _ => false,
+        };
+
+        let py_type = field.typ.get_python_type(&gen_ctx);
+
+        let try_body = if require_cast {
+            PyToken::Block(vec![
+                format!("{}: ", field.name).into(),
+                py_type.clone(),
+                " = ".into(),
+                type_import("cast"),
+                "(".into(),
+                py_type,
+                format!(
+                    ", {})",
+                    field.typ.get_parse_function(
+                        &gen_ctx,
+                        &format!(r#"data.get("{}")"#, field.name),
+                        0
+                    )
                 )
-            )
-            .into(),
-        ]);
+                .into(),
+            ])
+        } else {
+            PyToken::Block(vec![
+                format!("{}: ", field.name).into(),
+                py_type.clone(),
+                format!(
+                    " = {}",
+                    field.typ.get_parse_function(
+                        &gen_ctx,
+                        &format!(r#"data.get("{}")"#, field.name),
+                        0
+                    )
+                )
+                .into(),
+            ])
+        };
+
         from_json_body.push(py_try(
             try_body,
             vec![(
@@ -397,7 +428,7 @@ fn gen_py_alias(mut gen_ctx: &mut GenContext, a: &Alias) -> Vec<PyToken> {
         }
         AliasType::Reference(r) => match resolve_final_reference(&r) {
             TopDeclaration::Struct(s) => gen_alias_struct(&gen_ctx, &a, &r, &s),
-            TopDeclaration::Enum(e) => gen_alias_enum(&gen_ctx, &a, &r, &e),
+            TopDeclaration::Enum(e) => gen_alias_enum(&a, &e),
             TopDeclaration::Alias(_) => unreachable!(),
         },
         AliasType::Builtin(b) => {
@@ -485,50 +516,14 @@ fn gen_alias_struct(gen_ctx: &GenContext, a: &Alias, r: &RefType, s: &Struct) ->
     py_class(&a.name, vec![superclass.into()], body)
 }
 
-fn gen_alias_enum(gen_ctx: &GenContext, a: &Alias, r: &RefType, e: &Enum) -> Vec<PyToken> {
-    let superclass = if e.is_simple_enum() {
-        vec![]
-    } else {
-        let mut superclass_name = e.name.clone();
-        if !r.type_parameters.is_empty() {
-            superclass_name += "[";
-            superclass_name += &r
-                .type_parameters
-                .iter()
-                .map(|t| t.get_type_vars(TypeVarKind::AllTypes))
-                .flatten()
-                .collect::<Vec<_>>()
-                .join(", ");
-            superclass_name += "]";
-        };
-        vec![superclass_name.into()]
+fn gen_alias_enum(a: &Alias, e: &Enum) -> Vec<PyToken> {
+    // Python's Enum cannot be extended (subclassed). So just regenerate the full
+    // enum with the aliased name
+    let aliased_enum = Enum {
+        name: a.name.clone(),
+        ..e.clone()
     };
-
-    let mut body = vec![];
-    body.push("@classmethod".into());
-    body.push(PyToken::NewLine);
-
-    let return_type: PyToken = format!("{}", a.name).into();
-    body.push(PyToken::Block(py_fn(
-        "from_json",
-        vec![
-            "cls".into(),
-            typed_attr("data", vec![type_import("Any")], None),
-        ],
-        vec![
-            "return ".into(),
-            type_import("cast"),
-            "(".into(),
-            return_type.clone(),
-            format!(
-                ", {})",
-                Type::Reference(r.clone()).get_parse_function(&gen_ctx, "data", 0)
-            )
-            .into(),
-        ],
-        Some(PyToken::Block(vec!["\"".into(), return_type, "\"".into()])),
-    )));
-    py_class(&a.name, superclass, body)
+    vec![gen_simple_enum(&aliased_enum)]
 }
 
 fn gather_imports(tokens: &[PyToken]) -> ImportMap {
@@ -618,6 +613,135 @@ trait PythonJSON {
     fn get_python_type(&self, gen_ctx: &GenContext) -> PyToken;
 }
 
+impl PythonJSON for TopDeclaration {
+    fn get_parse_function(&self, gen_ctx: &GenContext, name: &str, depth: u8) -> String {
+        "alias_parse_function".to_string()
+    }
+
+    fn get_dump_function(&self, gen_ctx: &GenContext, name: &str, depth: u8) -> Option<String> {
+        Some("alias_dump_function".to_string())
+    }
+
+    fn get_python_type(&self, _gen_ctx: &GenContext) -> PyToken {
+        match self {
+            TopDeclaration::Struct(s) => s.name.clone().into(),
+            TopDeclaration::Enum(e) => {
+                if e.is_simple_enum() {
+                    e.name.clone().into()
+                } else {
+                    format!("{}TypeDef", e.name).into()
+                }
+            }
+            TopDeclaration::Alias(a) => a.name.clone().into(),
+        }
+    }
+}
+
+impl PythonJSON for RefType {
+    fn get_parse_function(&self, gen_ctx: &GenContext, name: &str, depth: u8) -> String {
+        // TODO: if the referenced type is an alias of a newtype, calling .from_json on
+        // it will not work.
+        // Also need to add cast() for these cases
+        let referenced_decl = self.target.as_ref();
+        if self.type_parameters.is_empty() {
+            match referenced_decl {
+                TopDeclaration::Struct(_) | TopDeclaration::Enum(_) => {
+                    if depth == 0 {
+                        // variant hint only make sense for the first level. It isn't possible to
+                        // have #[typeof] refer to things other than Referenced type
+                        match &self.variant_hint {
+                            Some(hint) => format!(
+                                r#"{}.from_json({}, tag=data.get("{}"))"#,
+                                referenced_decl.get_name(),
+                                name,
+                                hint
+                            ),
+                            None => format!("{}.from_json({})", referenced_decl.get_name(), name),
+                        }
+                    } else {
+                        format!("{}.from_json", referenced_decl.get_name(),)
+                    }
+                }
+                TopDeclaration::Alias(a) => a.get_parse_function(&gen_ctx, name, depth),
+            }
+        } else {
+            let parse_typevar_tuples = self
+                .type_parameters
+                .iter()
+                .map(|tv| {
+                    format!(
+                        "({}, {})",
+                        // name is irrelevant since the depth is always 1
+                        tv.get_parse_function(&gen_ctx, "", 1),
+                        tv.get_dump_function(&gen_ctx, "", 1)
+                            .unwrap_or("identity".to_string())
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            if depth == 0 {
+                match &self.variant_hint {
+                    Some(hint) => format!(
+                        r#"{}._from_json({}, {}, tag=data.get("{}"))"#,
+                        referenced_decl.get_name(),
+                        parse_typevar_tuples,
+                        name,
+                        hint
+                    ),
+                    None => format!(
+                        "{}._from_json({}, {})",
+                        referenced_decl.get_name(),
+                        parse_typevar_tuples,
+                        name
+                    ),
+                }
+            } else {
+                format!(
+                    "lambda x{}: {}._from_json({}, x{})",
+                    depth,
+                    referenced_decl.get_name(),
+                    parse_typevar_tuples,
+                    depth
+                )
+            }
+        }
+    }
+
+    fn get_dump_function(&self, gen_ctx: &GenContext, name: &str, depth: u8) -> Option<String> {
+        // TODO check if the referenced top declaration is an alias. In this case
+        // simply calling to_json on it will not work for newtypes
+        match &*self.target {
+            TopDeclaration::Struct(_) | TopDeclaration::Enum(_) => {
+                if depth == 0 {
+                    Some(format!("{}.to_json()", name))
+                } else {
+                    Some("lambda x: x.to_json()".to_owned())
+                }
+            }
+            TopDeclaration::Alias(alias) => alias.get_dump_function(&gen_ctx, name, depth),
+        }
+    }
+
+    fn get_python_type(&self, gen_ctx: &GenContext) -> PyToken {
+        if self.type_parameters.is_empty() {
+            self.target.get_python_type(&gen_ctx).into()
+        } else {
+            let mut params = vec![self.target.get_python_type(&gen_ctx).into()];
+            params.push("[".into());
+            params.extend(intersperce(
+                ", ".into(),
+                self.type_parameters
+                    .iter()
+                    .map(|tv| tv.get_python_type(&gen_ctx))
+                    .collect(),
+            ));
+            params.push("]".into());
+            PyToken::Block(params)
+        }
+    }
+}
+
 impl PythonJSON for Type {
     fn get_dump_function(&self, gen_ctx: &GenContext, name: &str, depth: u8) -> Option<String> {
         match self {
@@ -698,16 +822,7 @@ impl PythonJSON for Type {
                     }
                 },
             },
-            Type::Reference(r) => {
-                // let referenced_decl = &gen_ctx.top_declarations[r.name];
-                // TODO check if the referenced top declaration is an alias. In this case
-                // simply calling to_json on it will not work
-                if depth == 0 {
-                    Some(format!("{}.to_json()", name))
-                } else {
-                    Some("lambda x: x.to_json()".to_owned())
-                }
-            }
+            Type::Reference(r) => r.get_dump_function(&gen_ctx, name, depth),
             Type::TypeParameter(tv) => {
                 // depth == 0 is used for the .to_json() method
                 // while higher depths are used to construct the tuple
@@ -715,7 +830,7 @@ impl PythonJSON for Type {
                 if depth == 0 {
                     Some(format!("self._dump_{}({})", tv, name))
                 } else {
-                    Some(format!("lambda x: dump_{}(x)", tv))
+                    Some(format!("dump_{}", tv))
                 }
             }
         }
@@ -760,67 +875,7 @@ impl PythonJSON for Type {
                     }
                 },
             },
-            Type::Reference(r) => {
-                let referenced_decl = r.target.as_ref();
-                if r.type_parameters.is_empty() {
-                    if depth == 0 {
-                        // variant hint only make sense for the first level. It isn't possible to
-                        // have #[typeof] refer to things other than Referenced type
-                        match &r.variant_hint {
-                            Some(hint) => format!(
-                                r#"{}.from_json({}, tag=data.get("{}"))"#,
-                                referenced_decl.get_name(),
-                                name,
-                                hint
-                            ),
-                            None => format!("{}.from_json({})", referenced_decl.get_name(), name),
-                        }
-                    } else {
-                        format!("{}.from_json", referenced_decl.get_name(),)
-                    }
-                } else {
-                    let parse_typevar_tuples = r
-                        .type_parameters
-                        .iter()
-                        .map(|tv| {
-                            format!(
-                                "({}, {})",
-                                // name is irrelevant since the depth is always 1
-                                tv.get_parse_function(&gen_ctx, "", 1),
-                                tv.get_dump_function(&gen_ctx, "", 1)
-                                    .unwrap_or("identity".to_string())
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", ");
-
-                    if depth == 0 {
-                        match &r.variant_hint {
-                            Some(hint) => format!(
-                                r#"{}._from_json({}, {}, tag=data.get("{}"))"#,
-                                referenced_decl.get_name(),
-                                parse_typevar_tuples,
-                                name,
-                                hint
-                            ),
-                            None => format!(
-                                "{}._from_json({}, {})",
-                                referenced_decl.get_name(),
-                                parse_typevar_tuples,
-                                name
-                            ),
-                        }
-                    } else {
-                        format!(
-                            "lambda x{}: {}._from_json({}, x{})",
-                            depth,
-                            referenced_decl.get_name(),
-                            parse_typevar_tuples,
-                            depth
-                        )
-                    }
-                }
-            }
+            Type::Reference(r) => r.get_parse_function(&gen_ctx, name, depth),
             Type::TypeParameter(tv) => {
                 if depth == 0 {
                     format!("parse_{}({})", tv, name)
@@ -834,23 +889,7 @@ impl PythonJSON for Type {
     fn get_python_type(&self, gen_ctx: &GenContext) -> PyToken {
         match self {
             Type::Atomic(at) => atomic_py_instance(at).0.into(),
-            Type::Reference(r) => {
-                if r.type_parameters.is_empty() {
-                    r.target.get_py_python_type().into()
-                } else {
-                    let mut params = vec![r.target.get_py_python_type().into()];
-                    params.push("[".into());
-                    params.extend(intersperce(
-                        ", ".into(),
-                        r.type_parameters
-                            .iter()
-                            .map(|tv| tv.get_python_type(&gen_ctx))
-                            .collect(),
-                    ));
-                    params.push("]".into());
-                    PyToken::Block(params)
-                }
-            }
+            Type::Reference(r) => r.get_python_type(&gen_ctx),
             Type::Builtin(b) => match b {
                 Builtin::List(inner) => {
                     let list = type_import("List");
@@ -871,7 +910,7 @@ impl PythonJSON for Type {
                     ])
                 }
                 Builtin::Map(k, v) => {
-                    let dict = type_import("Mapping");
+                    let dict = type_import("Dict");
                     PyToken::Block(vec![
                         dict,
                         "[".into(),
@@ -925,6 +964,48 @@ impl PythonJSON for FieldType {
     }
 }
 
+impl PythonJSON for Alias {
+    fn get_parse_function(&self, gen_ctx: &GenContext, name: &str, depth: u8) -> String {
+        let parse_fn = match &self.alias {
+            AliasType::Atomic(at) => {
+                Type::Atomic(at.clone()).get_parse_function(&gen_ctx, name, depth)
+            }
+            AliasType::Reference(r) => {
+                Type::Reference(r.clone()).get_parse_function(&gen_ctx, name, depth)
+            }
+            AliasType::Builtin(b) => {
+                Type::Builtin(b.clone()).get_parse_function(&gen_ctx, name, depth)
+            }
+        };
+        if depth == 0 {
+            // TODO check that `cast` is imported somewhere, or change the type of
+            // get_parse_function to return a PyToken
+            format!("cast({}, {})", self.name, parse_fn)
+        } else {
+            format!("{}", parse_fn)
+        }
+    }
+
+    fn get_dump_function(&self, gen_ctx: &GenContext, name: &str, depth: u8) -> Option<String> {
+        match &self.alias {
+            AliasType::Atomic(at) => {
+                Type::Atomic(at.clone()).get_dump_function(&gen_ctx, name, depth)
+            }
+            AliasType::Reference(r) => {
+                println!("get dump function for alias reference {:#?}", r);
+                Type::Reference(r.clone()).get_dump_function(&gen_ctx, name, depth)
+            }
+            AliasType::Builtin(b) => {
+                Type::Builtin(b.clone()).get_dump_function(&gen_ctx, name, depth)
+            }
+        }
+    }
+
+    fn get_python_type(&self, gen_ctx: &GenContext) -> PyToken {
+        todo!()
+    }
+}
+
 fn gen_simple_enum(e: &Enum) -> PyToken {
     let enum_class = PyToken::Import(
         PyImport::Specific("enum".to_owned(), "Enum".to_owned()),
@@ -947,17 +1028,11 @@ fn gen_simple_enum(e: &Enum) -> PyToken {
     body.push(PyToken::NewLine);
     body.push(PyToken::NewLine);
 
-    let cast = PyImport::Specific("typing".to_owned(), "cast".to_owned());
     body.extend(py_fn(
         "to_json",
         vec!["self".into()],
-        vec![
-            "return ".into(),
-            PyToken::Import(cast, None),
-            format!("(str, self.value)").into(),
-        ],
+        vec!["return self.value".into()],
         Some(type_import("Any")),
-        // Some("str".into()),
     ));
     body.push(PyToken::NewLine);
     body.push(PyToken::NewLine);
@@ -2152,7 +2227,7 @@ impl Type {
                     "]".into(),
                 ]),
                 Builtin::Map(k, v) => {
-                    let dict = type_import("Mapping");
+                    let dict = type_import("Dict");
                     PyToken::Block(vec![
                         dict,
                         "[".into(),
@@ -2237,22 +2312,6 @@ impl<'tokens> ImportEntry<'tokens> {
             s.insert(t);
         }
         self.specifics = s.into_iter().collect();
-    }
-}
-
-impl TopDeclaration {
-    fn get_py_python_type(&self) -> String {
-        match self {
-            TopDeclaration::Struct(s) => s.name.to_owned(),
-            TopDeclaration::Enum(e) => {
-                if e.is_simple_enum() {
-                    e.name.to_owned()
-                } else {
-                    format!("{}TypeDef", e.name)
-                }
-            }
-            TopDeclaration::Alias(_) => todo!("get py python type for alias"),
-        }
     }
 }
 
@@ -2382,7 +2441,7 @@ fn typed_list(typ: PyToken) -> PyToken {
 }
 
 fn typed_dict(key_type: PyToken, val_type: PyToken) -> PyToken {
-    let dict = type_import("Mapping");
+    let dict = type_import("Dict");
     let mut tokens = vec![dict];
     tokens.push("[".into());
     tokens.push(key_type);
