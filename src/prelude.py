@@ -22,9 +22,9 @@ class ValidationError(Exception):
 def parse_primitive(prim_type: Union[type, Tuple[type, ...]], msg: str, x: Any) -> V:
     """Parse a non nullable primitive type"""
     if x is None:
-        raise ValidationError(message="Missing data for required field")
+        raise ValidationError(message="Missing data for required field", data=x)
     if not isinstance(x, prim_type):
-        raise ValidationError(message=msg)
+        raise ValidationError(message=msg, data=x)
     return cast(V, x)
 
 
@@ -51,7 +51,7 @@ def parse_bytes(x: Any) -> bytes:
     try:
         return base64.b64decode(raw)
     except binascii.Error as e:
-        raise ValidationError(message="Invalid base64 encoding: {}".format(e))
+        raise ValidationError(message="Invalid base64 encoding: {}".format(e), data=x)
 
 
 def parse_optional(parse: Callable[[Any], V], val: Any) -> Optional[V]:
@@ -71,7 +71,7 @@ def parse_list(parse: Callable[[Any], V], l: Any) -> List[V]:
         except ValidationError as e:
             errors[str(idx)] = e.messages
     if errors:
-        raise ValidationError(message=errors)
+        raise ValidationError(message=errors, data=l)
     return result
 
 
@@ -82,7 +82,8 @@ def parse_singleton(parse: Callable[[Any], V], l: Any) -> V:
     parsed = parse_list(parse, l)
     if len(parsed) != 1:
         raise ValidationError(
-            message="Must have exactly one element but got {}".format(len(parsed))
+            message="Must have exactly one element but got {}".format(len(parsed)),
+            data=l,
         )
     return parsed[0]
 
@@ -93,7 +94,7 @@ def parse_object(parse_val: Callable[[Any], V], x: Any) -> Dict[str, V]:
 
     if not isinstance(x, dict):
         raise ValidationError(
-            message="Expected a dictionnary but got {}".format(type(x))
+            message="Expected a dictionnary but got {}".format(type(x)), data=x
         )
 
     for k, v in x.items():
@@ -113,7 +114,7 @@ def parse_object(parse_val: Callable[[Any], V], x: Any) -> Dict[str, V]:
             result[key] = val
 
     if errors:
-        raise ValidationError(message=errors)
+        raise ValidationError(message=errors, data=x)
 
     return result
 
@@ -132,7 +133,8 @@ def parse_map(
         raise ValidationError(
             message="Expected a dictionnary or array of tuple but got {}".format(
                 type(x)
-            )
+            ),
+            data=x,
         )
 
     for idx, val in enumerate(x):
@@ -161,7 +163,7 @@ def parse_map(
                 result[key] = val
 
     if errors:
-        raise ValidationError(message=errors)
+        raise ValidationError(message=errors, data=x)
     return result
 
 

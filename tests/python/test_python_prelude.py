@@ -40,6 +40,25 @@ class TestParseFloat:
             p.parse_int(x)
 
 
+class TestParseList:
+    @pytest.mark.parametrize("x", [0, 1.2, math.nan, {b"foo", 2}])
+    def test_not_list(self, x: Any) -> None:
+        with pytest.raises(p.ValidationError):
+            p.parse_list(p.parse_int, x)
+
+    def test_ok_list(self) -> None:
+        parsed = p.parse_list(p.parse_int, [1, 2])
+        assert parsed == [1, 2]
+
+    def test_parse_singleton_incorrect_size(self) -> None:
+        with pytest.raises(p.ValidationError):
+            p.parse_singleton(p.parse_int, [1, 2])
+
+    def test_parse_singleton_ok(self) -> None:
+        parsed = p.parse_singleton(p.parse_int, [1])
+        assert parsed == 1
+
+
 class TestParseObject:
     @pytest.mark.parametrize("x", [0, 1.2, math.nan, {b"foo", 2}, [["foo", 1]]])
     def test_not_object(self, x: Any) -> None:
@@ -79,3 +98,36 @@ class TestParseMap:
         raw = [["Zm9v", 1], ["YmFy", 2]]
         expected = {b"foo": 1, b"bar": 2}
         assert p.parse_map(p.parse_bytes, p.parse_int, raw) == expected
+
+
+class TestExceptions:
+    @pytest.mark.parametrize(
+        "parse", [p.parse_bool, p.parse_int, p.parse_float, p.parse_str, p.parse_bytes]
+    )
+    def test_primitive_parse_raises_correct_attrs(self, parse: Any) -> None:
+        data = {"key": "not a primitive"}
+        with pytest.raises(p.ValidationError) as exc:
+            parse(data)
+
+        assert hasattr(exc.value, "messages")
+        assert isinstance(exc.value.messages, list)
+        assert hasattr(exc.value, "data")
+        assert exc.value.data == data
+
+    def test_parse_optional_exc(self) -> None:
+        with pytest.raises(p.ValidationError) as exc:
+            p.parse_optional(p.parse_bool, "not a bool")
+
+        assert hasattr(exc.value, "messages")
+        assert isinstance(exc.value.messages, list)
+        assert hasattr(exc.value, "data")
+        assert exc.value.data == "not a bool"
+
+    def test_parse_list_exc(self) -> None:
+        with pytest.raises(p.ValidationError) as exc:
+            p.parse_list(p.parse_bool, ["nope", True, "nope again"])
+
+        assert hasattr(exc.value, "messages")
+        assert isinstance(exc.value.messages, dict)
+        assert "0" in exc.value.messages
+        assert "2" in exc.value.messages
