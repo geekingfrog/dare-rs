@@ -65,6 +65,24 @@
         "valid": false,
         "data": "V"
       }
+    ],
+    "SumWithNewtype": [
+      {
+        "description": "valid variant",
+        "valid": true,
+        "data": {
+          "tag": "Variant",
+          "contents": "It's a string !"
+        }
+      },
+      {
+        "description": "variant has invalid value",
+        "valid": false,
+        "data": {
+          "tag": "Variant",
+          "contents": 123
+        }
+      }
     ]
   }
 }

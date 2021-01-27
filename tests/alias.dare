@@ -10,6 +10,7 @@
 type MyString String;
 type ListOfInt [Int];
 type OptInt Int?;
+type WordAssoc Map<String, String>;
 
 struct SimpleFoo {
   simple_field: String
@@ -30,3 +31,7 @@ enum Base {
 }
 
 type OtherBase Base
+
+enum SumWithNewtype {
+  Variant(MyString)
+}

@@ -453,7 +453,17 @@ fn gen_py_alias(mut gen_ctx: &mut GenContext, a: &Alias) -> Vec<PyToken> {
                         "]".into(),
                     ]
                 }
-                Builtin::Map(_, _) => todo!("map alias"),
+                Builtin::Map(k, v) => {
+                    vec![
+                        format!("{} = ", name).into(),
+                        type_import("Dict"),
+                        "[".into(),
+                        k.get_python_type(&gen_ctx),
+                        ", ".into(),
+                        v.get_python_type(&gen_ctx),
+                        "]".into(),
+                    ]
+                }
             }
         }
     }
@@ -2210,7 +2220,9 @@ impl Type {
                             format!("{}TypeDef", e.name).into()
                         }
                     }
-                    TopDeclaration::Alias(_) => todo!("py token for alias"),
+                    TopDeclaration::Alias(a) => {
+                        format!("{}", a.name).into()
+                    }
                 }
             }
             Type::Builtin(b) => match b {

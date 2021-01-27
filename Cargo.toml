@@ -1,5 +1,5 @@
 [package]
-name = "dare-rs"
+name = "dare"
 version = "0.1.0"
 authors = ["Grégoire Charvet 黑瓜 <greg@geekingfrog.com>"]
 edition = "2018"
@@ -26,6 +26,4 @@ pretty_assertions = "0.6.1"
 
 # Add a build-time dependency on the lalrpop library:
 [build-dependencies]
-# lalrpop = "0.19.0"
-# If you do not supply your own, external lexer you also need the `lexer` feature
-lalrpop = { version = "0.19.0", features = ["lexer"] }
+lalrpop = "0.19.0"
