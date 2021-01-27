@@ -3,6 +3,7 @@
 set -euo pipefail
 
 mkdir -p dare
+
 cargo run -- --schema "../atomic_struct.dare" --target-dir ./dare
 cargo run -- --schema "../simple_enum.dare" --target-dir ./dare
 cargo run -- --schema "../simple_sum.dare" --target-dir ./dare

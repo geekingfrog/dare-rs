@@ -150,6 +150,16 @@
           "contents": [null, 2]
         }
       }
+    ],
+    "NestedMono": [
+      {
+        "description": "deeply nested alias",
+        "valid": true,
+        "data": {
+          "t": "",
+          "contents": 123
+        }
+      }
     ]
   }
 }

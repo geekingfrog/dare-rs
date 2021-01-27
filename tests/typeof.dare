@@ -8,3 +8,10 @@ struct Response {
   result: Result,
   response_type: #[typeof("result")],
 }
+
+struct Poly<T> {
+  t: #[typeof("val")],
+  val: T
+}
+
+type Mono Poly<Result>

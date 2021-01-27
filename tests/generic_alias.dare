@@ -20,3 +20,4 @@ enum Result<OkType,ErrType> {
 
 type MyResult Result<String, Int>
 type NestedResult Result<String, [Int?]>
+type StructEnum PolyFoo<Result<String, Int>>

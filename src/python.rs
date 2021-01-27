@@ -104,7 +104,7 @@ fn gen_py_struct(mut gen_ctx: &mut GenContext, s: &Struct) -> Vec<PyToken> {
         s.fields
             .iter()
             .filter_map(|f| match &f.typ {
-                FieldType::TypeOf(_) => None,
+                FieldType::TypeOf(_, _) => None,
                 FieldType::Type(t) => Some((&f.name, t)),
             })
             .map(|(name, typ)| {
@@ -166,14 +166,26 @@ fn gen_py_struct(mut gen_ctx: &mut GenContext, s: &Struct) -> Vec<PyToken> {
         ])
     }));
 
-    from_json_body.push("errors = {}".into());
+    if s.fields.is_empty() {
+        // mypy complains with only `errors = {}` when there is no usage of it
+        // for an empty struct
+        from_json_body.extend(vec![
+            "errors: ".into(),
+            type_import("Dict"),
+            "[str, ".into(),
+            type_import("Any"),
+            "] = {}".into(),
+        ]);
+    } else {
+        from_json_body.push("errors = {}".into());
+    }
     from_json_body.push(PyToken::NewLine);
     from_json_body.push(PyToken::NewLine);
 
     for field in &s.fields {
         // skip #[typeof] fields, generate @properties field for that
         match field.typ {
-            FieldType::TypeOf(_) => continue,
+            FieldType::TypeOf(_, _) => continue,
             FieldType::Type(_) => (),
         };
 
@@ -247,7 +259,7 @@ fn gen_py_struct(mut gen_ctx: &mut GenContext, s: &Struct) -> Vec<PyToken> {
         .fields
         .iter()
         .filter_map(|f| match f.typ {
-            FieldType::TypeOf(_) => None,
+            FieldType::TypeOf(_, _) => None,
             FieldType::Type(_) => Some(format!("{}", f.name).into()),
         })
         .collect();
@@ -281,11 +293,11 @@ fn gen_py_struct(mut gen_ctx: &mut GenContext, s: &Struct) -> Vec<PyToken> {
     body.push(PyToken::NewLine);
 
     // Generate a @property function for each #[typeof] field
-    for (field_name, hint_target) in &s
+    for (field_name, hint_target, is_generic) in &s
         .fields
         .iter()
         .filter_map(|f| match &f.typ {
-            FieldType::TypeOf(target) => Some((&f.name, target)),
+            FieldType::TypeOf(target, tv) => Some((&f.name, target, tv.is_some())),
             FieldType::Type(_) => None,
         })
         .collect::<Vec<_>>()
@@ -295,7 +307,16 @@ fn gen_py_struct(mut gen_ctx: &mut GenContext, s: &Struct) -> Vec<PyToken> {
         body.extend(py_fn(
             field_name,
             vec!["self".into()],
-            vec![format!("return self.{}.json_type", hint_target).into()],
+            // TODO. The `type: ignore` is a bit crude. It would be nice to have
+            // a constraint on the type parameter instead
+            vec![
+                format!("return self.{}.json_type", hint_target).into(),
+                if *is_generic {
+                    "  # type: ignore".into()
+                } else {
+                    PyToken::Empty
+                },
+            ],
             Some("str".into()),
         ));
         body.push(PyToken::NewLine)
@@ -415,7 +436,7 @@ fn gen_generic_parse_dump_hint(tv: &str) -> PyToken {
     PyToken::Block(tokens)
 }
 
-fn gen_py_alias(mut gen_ctx: &mut GenContext, a: &Alias) -> Vec<PyToken> {
+fn gen_py_alias(gen_ctx: &mut GenContext, a: &Alias) -> Vec<PyToken> {
     let name = a.name.to_pascal_case();
     match &a.alias {
         AliasType::Atomic(at) => {
@@ -487,15 +508,17 @@ fn resolve_final_reference(r: &RefType) -> &TopDeclaration {
 /// the same behavior and from/to json functions
 fn gen_alias_struct(gen_ctx: &GenContext, a: &Alias, r: &RefType, s: &Struct) -> Vec<PyToken> {
     let mut superclass = s.name.clone();
+
     if !r.type_parameters.is_empty() {
         superclass += "[";
-        superclass += &r
+        let type_vars = &r
             .type_parameters
             .iter()
             .map(|t| t.get_type_vars(TypeVarKind::AllTypes))
             .flatten()
-            .collect::<Vec<_>>()
-            .join(", ");
+            .collect::<Vec<_>>();
+
+        superclass += &type_vars.join(", ");
         superclass += "]";
     }
 
@@ -950,7 +973,7 @@ impl FieldType {
 impl PythonJSON for FieldType {
     fn get_parse_function(&self, gen_ctx: &GenContext, name: &str, depth: u8) -> String {
         match self {
-            FieldType::TypeOf(_) => {
+            FieldType::TypeOf(_, _) => {
                 Type::Atomic(AtomicType::Str).get_parse_function(&gen_ctx, name, depth)
             }
             FieldType::Type(t) => t.get_parse_function(&gen_ctx, name, depth),
@@ -959,7 +982,7 @@ impl PythonJSON for FieldType {
 
     fn get_dump_function(&self, gen_ctx: &GenContext, name: &str, depth: u8) -> Option<String> {
         match self {
-            FieldType::TypeOf(_) => {
+            FieldType::TypeOf(_, _) => {
                 Type::Atomic(AtomicType::Str).get_dump_function(&gen_ctx, name, depth)
             }
             FieldType::Type(t) => t.get_dump_function(&gen_ctx, name, depth),
@@ -968,7 +991,7 @@ impl PythonJSON for FieldType {
 
     fn get_python_type(&self, gen_ctx: &GenContext) -> PyToken {
         match self {
-            FieldType::TypeOf(_) => "str".into(),
+            FieldType::TypeOf(_, _) => "str".into(),
             FieldType::Type(t) => t.get_python_type(gen_ctx),
         }
     }
@@ -1002,7 +1025,6 @@ impl PythonJSON for Alias {
                 Type::Atomic(at.clone()).get_dump_function(&gen_ctx, name, depth)
             }
             AliasType::Reference(r) => {
-                println!("get dump function for alias reference {:#?}", r);
                 Type::Reference(r.clone()).get_dump_function(&gen_ctx, name, depth)
             }
             AliasType::Builtin(b) => {
@@ -1331,7 +1353,8 @@ fn gen_from_json_enum(_gen_ctx: &GenContext, e: &Enum) -> PyToken {
     };
 
     PyToken::Block(py_class(
-        &e.name.to_pascal_case(),
+        // &e.name.to_pascal_case(),
+        &e.name,
         super_classes,
         vec![
             "@classmethod".into(),
@@ -2185,12 +2208,25 @@ impl Type {
                 TypeVarKind::OnlyTypeVars => vec![],
                 TypeVarKind::AllTypes => vec![atomic_py_instance(&a).0.to_string()],
             },
-            Type::Reference(r) => r
-                .type_parameters
-                .iter()
-                .map(|t| t.get_type_vars(typevar_kind))
-                .flatten()
-                .collect(),
+            Type::Reference(r) => {
+                let tps = r
+                    .type_parameters
+                    .iter()
+                    .map(|t| t.get_type_vars(typevar_kind))
+                    .flatten()
+                    .collect();
+                match typevar_kind {
+                    TypeVarKind::OnlyTypeVars => tps,
+                    TypeVarKind::AllTypes => {
+                        if tps.is_empty() {
+                            vec![r.name.clone()]
+                        } else {
+                            vec![format!("{}[{}]", r.name, tps.join(", "))]
+                            // vec![format!("{}[{}]", r.get_python_type(), tps.join(", "))]
+                        }
+                    }
+                }
+            }
             Type::Builtin(b) => match b {
                 Builtin::List(t) => t.get_type_vars(typevar_kind),
                 Builtin::Optional(o) => o.get_type_vars(typevar_kind),
@@ -2220,9 +2256,7 @@ impl Type {
                             format!("{}TypeDef", e.name).into()
                         }
                     }
-                    TopDeclaration::Alias(a) => {
-                        format!("{}", a.name).into()
-                    }
+                    TopDeclaration::Alias(a) => format!("{}", a.name).into(),
                 }
             }
             Type::Builtin(b) => match b {

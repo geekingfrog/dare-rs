@@ -87,8 +87,9 @@ pub struct Field {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum FieldType {
-    /// name of the field holding the referenced type
-    TypeOf(String),
+    /// name of the field holding the referenced type and name
+    /// of the optional type parameter
+    TypeOf(String, Option<String>),
     Type(Type),
 }
 
@@ -262,7 +263,7 @@ impl ast::Struct {
         let fields = self
             .fields
             .iter()
-            .map(|f| f.to_gen_ast(&mappings, &type_mappings, &type_params))
+            .map(|f| f.to_gen_ast(&mappings, &type_mappings, &type_params, &self.fields))
             .collect::<Result<_>>();
 
         Ok(Struct {
@@ -344,6 +345,7 @@ impl ast::Field {
         mappings: &Mappings,
         type_mappings: &TypeMappings,
         type_params: &BTreeSet<String>,
+        fields: &Vec<ast::Field>,
     ) -> Result<Field> {
         let variant_hint = type_mappings
             .iter()
@@ -353,7 +355,9 @@ impl ast::Field {
         Ok(Field {
             location: self.location,
             name: self.name.clone(),
-            typ: self.typ.to_gen_ast(&mappings, variant_hint, type_params)?,
+            typ: self
+                .typ
+                .to_gen_ast(&mappings, variant_hint, type_params, &self.name, fields)?,
         })
     }
 }
@@ -364,9 +368,52 @@ impl ast::FieldType {
         mappings: &Mappings,
         variant_hint: Option<String>,
         type_params: &BTreeSet<String>,
+        field_name: &str,
+        fields: &Vec<ast::Field>,
     ) -> Result<FieldType> {
         match self {
-            ast::FieldType::TypeOf(s) => Ok(FieldType::TypeOf(s.clone())),
+            ast::FieldType::TypeOf(s) => match fields.iter().find(|f| &f.name == s) {
+                None => Err(anyhow!(
+                    "field {} references another field: {} but it wasn't found in the struct",
+                    field_name,
+                    s
+                )),
+                Some(target_field) => {
+                    match &target_field.typ {
+                        ast::FieldType::TypeOf(_) => {
+                            Err(anyhow!("field {} is the type of {}. The target field cannot be itself a #[typeof]", field_name, target_field.name))
+                        }
+                        ast::FieldType::Type(t) => match t {
+                            ast::Type::Atomic(_) => Err(anyhow!(
+                                "field {} cannot be the type of the atomic type behind {}",
+                                field_name,
+                                target_field.name
+                            )),
+                            ast::Type::Builtin(_) => Err(anyhow!(
+                                    "field {} cannot be the type of the builtin type behind {}",
+                                    field_name,
+                                    target_field.name
+                            )),
+                            ast::Type::Reference(_) => {
+                                // TODO: lookup the referenced type, and reject if it's an
+                                // atomic type, a builtin or a struct. Only allow type
+                                // parameters and enums.
+                                let tv = match &target_field.typ {
+                                    // check if the referenced field is a type parameter
+                                    ast::FieldType::Type(ast::Type::Reference(r)) => {
+                                        match type_params.get(&r.name) {
+                                            Some(_) => Some(r.name.clone()),
+                                            None => None,
+                                        }
+                                    }
+                                    _ => None,
+                                };
+                                Ok(FieldType::TypeOf(s.clone(), tv))
+                            }
+                        },
+                    }
+                }
+            },
             ast::FieldType::Type(t) => t
                 .to_gen_ast(&mappings, variant_hint, type_params)
                 .map(FieldType::Type),

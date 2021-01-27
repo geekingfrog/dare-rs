@@ -1,5 +1,5 @@
 from dare.json_directives import EnumUnion, UnionSimple1, UnionString
-from dare import nested, typeof, simple_sum, generic_struct, generic_sum
+from dare import nested, typeof, simple_sum, generic_struct, generic_sum, generic_alias
 from typing import NewType
 
 
@@ -82,3 +82,10 @@ class TestGenericSum:
     def test_dynamic_dump_err(self) -> None:
         x = generic_sum.Wrap(result=generic_sum.Err(42))
         assert x.to_json() == {"result": {"tag": "Err", "contents": 42}}
+
+
+class TestGenericAlias:
+    def test_typecheck_at_construction(self) -> None:
+        inner = generic_alias.Ok("ok val")
+        x = generic_alias.StructEnum(inner)
+        assert x
