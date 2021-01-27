@@ -523,7 +523,7 @@ fn gen_alias_struct(gen_ctx: &GenContext, a: &Alias, r: &RefType, s: &Struct) ->
         let type_vars = r
             .type_parameters
             .iter()
-            .map(|t| PyToken::Block(t.get_type_vars(TypeVarKind::AllTypes)))
+            .map(|t| PyToken::Block(t.get_type_vars(&gen_ctx, TypeVarKind::AllTypes)))
             .collect::<Vec<_>>();
 
         superclass_toks.extend(intersperce(", ".into(), type_vars));
@@ -1128,7 +1128,7 @@ fn gen_py_sum_type(mut gen_ctx: &mut GenContext, e: &Enum) -> PyToken {
     }
 
     // the union of all variants
-    tokens.push(gen_py_sum_typedef(&e));
+    tokens.push(gen_py_sum_typedef(&gen_ctx, &e));
     tokens.push(PyToken::NewLine);
     tokens.push(PyToken::NewLine);
 
@@ -1137,7 +1137,7 @@ fn gen_py_sum_type(mut gen_ctx: &mut GenContext, e: &Enum) -> PyToken {
     PyToken::Block(tokens)
 }
 
-fn gen_py_sum_typedef(e: &Enum) -> PyToken {
+fn gen_py_sum_typedef(ctx: &GenContext, e: &Enum) -> PyToken {
     let mut tokens = vec![];
     tokens.push(format!("{}TypeDef = ", e.name).into());
     tokens.push(typed_union(
@@ -1145,7 +1145,7 @@ fn gen_py_sum_typedef(e: &Enum) -> PyToken {
             .iter()
             .map(|v| {
                 let mut toks = vec![v.name.clone().into()];
-                let tvs = v.value.get_type_vars(TypeVarKind::OnlyTypeVars);
+                let tvs = v.value.get_type_vars(&ctx, TypeVarKind::OnlyTypeVars);
                 if !tvs.is_empty() {
                     toks.push("[".into());
                     toks.extend(intersperce(", ".into(), tvs));
@@ -1159,7 +1159,7 @@ fn gen_py_sum_typedef(e: &Enum) -> PyToken {
     PyToken::Block(tokens)
 }
 
-fn gen_from_json_enum(_gen_ctx: &GenContext, e: &Enum) -> PyToken {
+fn gen_from_json_enum(gen_ctx: &GenContext, e: &Enum) -> PyToken {
     let mut from_json_body = vec![];
 
     let json_directive = e
@@ -1228,7 +1228,7 @@ fn gen_from_json_enum(_gen_ctx: &GenContext, e: &Enum) -> PyToken {
                 } else {
                     let fn_name = if variant
                         .value
-                        .get_type_vars(TypeVarKind::OnlyTypeVars)
+                        .get_type_vars(&gen_ctx, TypeVarKind::OnlyTypeVars)
                         .is_empty()
                     {
                         "from_json"
@@ -1243,7 +1243,10 @@ fn gen_from_json_enum(_gen_ctx: &GenContext, e: &Enum) -> PyToken {
                     )
                     .into()];
 
-                    for tv in variant.value.get_type_vars(TypeVarKind::OnlyTypeVars) {
+                    for tv in variant
+                        .value
+                        .get_type_vars(&gen_ctx, TypeVarKind::OnlyTypeVars)
+                    {
                         // return_toks.push(format!(", json_{}", tv).into());
                         return_toks.push(", json_".into());
                         return_toks.push(tv);
@@ -1300,7 +1303,7 @@ fn gen_from_json_enum(_gen_ctx: &GenContext, e: &Enum) -> PyToken {
                 // TODO use get_parse_function instead of that hardcoded stuff
                 // from_json_body.push(format!("return {}", v.value));
 
-                let tvs = v.value.get_type_vars(TypeVarKind::OnlyTypeVars);
+                let tvs = v.value.get_type_vars(&gen_ctx, TypeVarKind::OnlyTypeVars);
                 if tvs.is_empty() {
                     from_json_body.push(
                         format!("return {}.from_json(contents", v.name.to_pascal_case()).into(),
@@ -1428,7 +1431,7 @@ fn gen_enum_variant(
     tokens.push(PyToken::NewLine);
     let generic_class_params: Vec<PyToken> = variant
         .value
-        .get_type_vars(TypeVarKind::OnlyTypeVars)
+        .get_type_vars(&gen_ctx, TypeVarKind::OnlyTypeVars)
         .into_iter()
         .map(|tv| tv.into())
         .collect();
@@ -1581,10 +1584,7 @@ fn gen_enum_variant_typedict(
     (td_name, PyToken::Block(tokens))
 }
 
-fn gen_enum_variant_tuple(
-    _gen_ctx: &mut GenContext,
-    variant: &EnumVariant,
-) -> (String, PyToken) {
+fn gen_enum_variant_tuple(_gen_ctx: &mut GenContext, variant: &EnumVariant) -> (String, PyToken) {
     let tuple = type_import("Tuple");
     let tuple_name = format!("{}JSON", variant.name);
     let mut tuple_args = vec!["str".into()];
@@ -1612,10 +1612,7 @@ fn gen_enum_variant_tuple(
     (tuple_name.clone(), PyToken::Block(tokens))
 }
 
-fn gen_enum_variant_union(
-    _gen_ctx: &mut GenContext,
-    variant: &EnumVariant,
-) -> (String, PyToken) {
+fn gen_enum_variant_union(_gen_ctx: &mut GenContext, variant: &EnumVariant) -> (String, PyToken) {
     match &variant.value {
         VariantValue::OnlyCtor => ("None".to_string(), PyToken::Block(vec![])),
         VariantValue::PositionalCtor(refs) => {
@@ -1657,7 +1654,7 @@ fn gen_enum_variant_from_json(
     let mut from_json_body = vec![];
     let parse_generic_functions = variant
         .value
-        .get_type_vars(TypeVarKind::OnlyTypeVars)
+        .get_type_vars(&gen_ctx, TypeVarKind::OnlyTypeVars)
         .into_iter()
         .map(|tv| {
             // format!("parse_{}, dump_{} = json_{}", tv, tv, tv).into()
@@ -1672,7 +1669,9 @@ fn gen_enum_variant_from_json(
         })
         .collect();
 
-    let tvs = variant.value.get_type_vars(TypeVarKind::OnlyTypeVars);
+    let tvs = variant
+        .value
+        .get_type_vars(&gen_ctx, TypeVarKind::OnlyTypeVars);
     let return_type = if tvs.is_empty() {
         Some(format!(r#""{}""#, variant.name.to_pascal_case()).into())
     } else {
@@ -1695,7 +1694,9 @@ fn gen_enum_variant_from_json(
 
                 from_json_body.push(PyToken::NewLine);
                 from_json_body.push(gen_typevar_dump_fields(
-                    &variant.value.get_type_vars(TypeVarKind::OnlyTypeVars),
+                    &variant
+                        .value
+                        .get_type_vars(&gen_ctx, TypeVarKind::OnlyTypeVars),
                 ));
 
                 from_json_body.push(PyToken::NewLine);
@@ -1722,7 +1723,7 @@ fn gen_enum_variant_from_json(
                 cls_args.append(
                     &mut variant
                         .value
-                        .get_type_vars(TypeVarKind::OnlyTypeVars)
+                        .get_type_vars(&gen_ctx, TypeVarKind::OnlyTypeVars)
                         .into_iter()
                         .map(|tv| PyToken::Block(vec!["dump_".into(), tv]))
                         .collect(),
@@ -1730,7 +1731,7 @@ fn gen_enum_variant_from_json(
 
                 let json_args = variant
                     .value
-                    .get_type_vars(TypeVarKind::OnlyTypeVars)
+                    .get_type_vars(&gen_ctx, TypeVarKind::OnlyTypeVars)
                     .iter()
                     .map(|tv| {
                         PyToken::Block(vec![
@@ -1746,7 +1747,7 @@ fn gen_enum_variant_from_json(
                 from_json_body.push(PyToken::NewLine);
                 let fn_name = if variant
                     .value
-                    .get_type_vars(TypeVarKind::OnlyTypeVars)
+                    .get_type_vars(&gen_ctx, TypeVarKind::OnlyTypeVars)
                     .is_empty()
                 {
                     "from_json"
@@ -1791,7 +1792,9 @@ fn gen_enum_variant_from_json(
 
                 from_json_body.push(PyToken::NewLine);
                 from_json_body.push(gen_typevar_dump_fields(
-                    &variant.value.get_type_vars(TypeVarKind::OnlyTypeVars),
+                    &variant
+                        .value
+                        .get_type_vars(&gen_ctx, TypeVarKind::OnlyTypeVars),
                 ));
 
                 from_json_body.push(PyToken::NewLine);
@@ -1804,7 +1807,7 @@ fn gen_enum_variant_from_json(
 
                 let json_args = variant
                     .value
-                    .get_type_vars(TypeVarKind::OnlyTypeVars)
+                    .get_type_vars(&gen_ctx, TypeVarKind::OnlyTypeVars)
                     .iter()
                     .map(|tv| {
                         PyToken::Block(vec![
@@ -2239,41 +2242,29 @@ enum TypeVarKind {
 }
 
 impl Type {
-    fn get_type_vars(&self, typevar_kind: TypeVarKind) -> Vec<PyToken> {
+    fn get_type_vars(&self, ctx: &GenContext, typevar_kind: TypeVarKind) -> Vec<PyToken> {
         match &self {
             Type::Atomic(a) => match typevar_kind {
                 TypeVarKind::OnlyTypeVars => vec![],
                 TypeVarKind::AllTypes => vec![atomic_py_instance(&a).0.into()],
             },
-            Type::Reference(r) => {
-                let tps = r
+            Type::Reference(r) => match typevar_kind {
+                TypeVarKind::OnlyTypeVars => r
                     .type_parameters
                     .iter()
-                    .map(|t| t.get_type_vars(typevar_kind))
+                    .map(|t| t.get_type_vars(&ctx, typevar_kind))
                     .flatten()
-                    .collect();
-                match typevar_kind {
-                    TypeVarKind::OnlyTypeVars => tps,
-                    TypeVarKind::AllTypes => {
-                        if tps.is_empty() {
-                            vec![r.name.clone().into()]
-                        } else {
-                            // vec![format!("{}[{}]", r.name, tps.join(", "))]
-                            // vec![format!("{}[{}]", r.get_python_type(), tps.join(", "))]
-                            let mut toks = vec![format!("{}[", r.name).into()];
-                            toks.extend(intersperce(", ".into(), tps));
-                            toks.push("]".into());
-                            toks
-                        }
-                    }
+                    .collect(),
+                TypeVarKind::AllTypes => {
+                    vec![r.get_python_type(&ctx)]
                 }
-            }
+            },
             Type::Builtin(b) => match b {
-                Builtin::List(t) => t.get_type_vars(typevar_kind),
-                Builtin::Optional(o) => o.get_type_vars(typevar_kind),
+                Builtin::List(t) => t.get_type_vars(&ctx, typevar_kind),
+                Builtin::Optional(o) => o.get_type_vars(&ctx, typevar_kind),
                 Builtin::Map(k, v) => {
-                    let mut ks = k.get_type_vars(typevar_kind);
-                    let mut vs = v.get_type_vars(typevar_kind);
+                    let mut ks = k.get_type_vars(&ctx, typevar_kind);
+                    let mut vs = v.get_type_vars(&ctx, typevar_kind);
                     ks.append(&mut vs);
                     ks
                 }
@@ -2403,12 +2394,14 @@ impl<'tokens> ImportEntry<'tokens> {
 }
 
 impl VariantValue {
-    fn get_type_vars(&self, k: TypeVarKind) -> Vec<PyToken> {
+    fn get_type_vars(&self, ctx: &GenContext, k: TypeVarKind) -> Vec<PyToken> {
         match &self {
             VariantValue::OnlyCtor => Vec::new(),
-            VariantValue::PositionalCtor(typs) => {
-                typs.iter().map(|t| t.get_type_vars(k)).flatten().collect()
-            }
+            VariantValue::PositionalCtor(typs) => typs
+                .iter()
+                .map(|t| t.get_type_vars(&ctx, k))
+                .flatten()
+                .collect(),
         }
     }
 }
